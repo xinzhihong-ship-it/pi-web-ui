@@ -1,4 +1,5 @@
 import { deviceLabel } from "./device-label.js";
+import { legacyHubHosts } from "./hub-origins.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { parseReportMetadata } from "./report-metadata.js";
 import { computeLegacyOutcomeFingerprint } from "./task-outcome.js";
@@ -513,6 +514,7 @@ export function createWsMessageChannel(transport: WebSocket) {
 export interface DeviceRelayOptions {
 	server: Server;
 	publicUrl: string;
+	legacyOrigins?: string[];
 	deviceDomain?: string;
 	pathAccess?: boolean;
 	deviceOrigins?: () => ReadonlyMap<string, string>;
@@ -559,6 +561,7 @@ export interface RelayTaskBinding {
 
 export function createDeviceRelay(options: DeviceRelayOptions) {
 	const hub = checkedUrl(options.publicUrl);
+	const legacyHosts = legacyHubHosts(options.legacyOrigins);
 	const domain = options.deviceDomain?.toLowerCase();
 	if (domain !== undefined) {
 		if (!/^[a-z0-9.-]+(?::\d+)?$/.test(domain)) throw new Error("Invalid device domain");
@@ -1344,7 +1347,7 @@ export function createDeviceRelay(options: DeviceRelayOptions) {
 		try {
 			if (
 				closed ||
-				req.headers.host !== hub.host ||
+				(req.headers.host !== hub.host && !legacyHosts.has(req.headers.host ?? "")) ||
 				req.headers.origin ||
 				!/^[a-z0-9][a-z0-9-]{0,62}$/.test(device) ||
 				!credential ||

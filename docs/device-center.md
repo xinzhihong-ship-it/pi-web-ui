@@ -60,6 +60,22 @@ pi-web-ui hub uninstall
 
 Linux 使用 `systemd --user`，macOS 使用 launchd 用户服务，Windows 使用登录计划任务。原生服务管理器不可用或权限不足时，安装会报告失败；Linux 在无人登录时开机启动需管理员为该用户启用 linger。CLI 配置中的锁只有在确认持有进程已退出时才回收，未知或仍存活的持有者不会被覆盖。
 
+### 公网 HTTPS 自动部署
+
+Linux 公网安装默认配置可信 HTTPS。将下面的地址换成自己的公网 IPv4 或已解析到服务器的域名即可；不依赖某台电脑、固定 IP 或其他应用的配置：
+
+```sh
+pi-web-ui hub install --public-url https://YOUR_PUBLIC_IP_OR_DOMAIN --allow-registration
+```
+
+Debian/Ubuntu 自动准备 Certbot（至少 5.4），为公网 IPv4 申请 Let's Encrypt 短期证书，为域名申请域名证书，安装 Node HTTPS/WebSocket 网关和每六小时检查一次的续期计时器。已有匹配的 Certbot 证书会复用，其原有续期钩子保持不变；网关自动加载更新后的证书。管理员权限仅用于证书、80/443 端口和 systemd 系统服务；Hub 仍使用原来的用户服务和数据目录。其他 Linux 发行版需事先安装 Certbot 5.4+；自动 IPv6 证书部署暂不支持。
+
+公网 TCP 80（证书验证）和 443（HTTPS）须在云安全组及防火墙放行。自动安装器不会抢占其他应用的端口：若 80/443 已被占用且没有可复用证书，应使用现有反向代理并传 `--https=external`；局域网 HTTP 或调试部署可传 `--https=off`。HTTP 的 `--public-url` 在自动部署成功后会转为同一主机的默认 HTTPS 地址，内部 Hub 端口仍是 8790。HTTPS 校验失败会恢复原 Hub 配置，命令不会报告安装成功。
+
+已有 Hub 更新到支持 HTTPS 的版本后，运行一次 `pi-web-ui hub https`。可用 `--public-url https://YOUR_DOMAIN` 指定新地址。原有 HTTP 地址仅保留已认证设备连接，浏览器入口跳转 HTTPS；已有账号、群组和设备绑定保留。设备稍后可改用 HTTPS Hub 地址，全部迁移后可关闭旧 HTTP 端口。`PI_DEVICE_HUB_LEGACY_ORIGINS` 是这一兼容白名单（最多八个 HTTP origin），不会放宽浏览器管理接口的 Origin 校验。`PI_DEVICE_HUB_HTTPS=off|external` 与对应安装参数同义。
+
+HTTPS 提供浏览器 WebCodecs、剪贴板等安全上下文；P2P 能否建立仍取决于双方版本及 NAT/防火墙。HTTPS 本身不会让中继自动变成直连。仅卸载 Hub 用户服务不会删除共享证书或 HTTPS 系统服务；停用整个部署时应同时停用对应的 `pi-device-hub[-名称]-https.service` 和续期计时器。
+
 不带子命令的 `pi-web-ui hub` 保留前台运行方式，可配置以下环境变量；源码目录也可以运行 `node bin/pi-device-hub.mjs`。
 
 | 环境变量                           | 说明                                                                    |
