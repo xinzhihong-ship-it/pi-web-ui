@@ -33,15 +33,45 @@ it("reduces bitrate before FPS and recovers gradually, retaining explicit qualit
 	const base = { maxEdge: 1920, fps: 120, quality: 70 };
 	flow.ack(flow.frame(0), 0, 10);
 	flow.ack(flow.frame(1000), 9, 1400);
+	flow.ack(flow.frame(2400), 9, 2800);
 	expect(flow.profile(base, true).quality).toBeLessThan(70);
 	expect(flow.profile(base, true).fps).toBe(120);
-	for (let t = 2000; t < 9000; t += 1000) flow.ack(flow.frame(t), 9, t + 400);
+	for (let t = 4000; t < 25000; t += 1000) flow.ack(flow.frame(t), 9, t + 400);
 	const limited = flow.profile(base, true);
 	expect(limited.fps).toBeLessThan(120);
 	expect(limited.maxEdge).toBe(1920);
 	expect(flow.profile(base, false)).toEqual(base);
-	for (let t = 10000; t < 60000; t += 1000) flow.ack(flow.frame(t), 0, t + 12);
+	for (let t = 26000; t < 150000; t += 1000) flow.ack(flow.frame(t), 0, t + 12);
 	expect(flow.profile(base, true)).toEqual(base);
+});
+
+it("does not reconfigure a recovered WAN burst every second", () => {
+	const flow = new DesktopVideoFlow();
+	const base = { maxEdge: 1920, fps: 60, quality: 70 };
+	flow.ack(flow.frame(0), 0, 330);
+	for (let second = 1; second <= 60; second++) {
+		// First ACK of the burst waited for retransmission/decoder scheduling.
+		// Later ACKs in the same second prove the queue drained normally.
+		flow.ack(flow.frame(second * 1000 - 500), 9, second * 1000 + 330);
+		for (let offset = 100; offset <= 900; offset += 100)
+			flow.ack(flow.frame(second * 1000 + offset), 0, second * 1000 + offset + 330);
+		expect(flow.profile(base, true)).toEqual(base);
+	}
+});
+
+it("requires sustained recovery before raising quality and ignores encoder startup delay", () => {
+	const flow = new DesktopVideoFlow(),
+		base = { fps: 60, quality: 70 };
+	for (let t = 0; t < 1000; t += 100) flow.ack(flow.frame(t), 0, t + 20);
+	for (let t = 1000; t <= 4000; t += 100) flow.ack(flow.frame(t), 0, t + 400);
+	const reduced = flow.profile(base, true);
+	expect(reduced.quality).toBeLessThan(base.quality);
+	flow.reset();
+	flow.ack(flow.frame(5000), 9, 6000);
+	for (let t = 6100; t <= 10000; t += 100) flow.ack(flow.frame(t), 0, t + 20);
+	expect(flow.profile(base, true)).toEqual(reduced);
+	for (let t = 10100; t < 25000; t += 100) flow.ack(flow.frame(t), 0, t + 20);
+	expect(flow.profile(base, true).quality).toBeGreaterThan(reduced.quality);
 });
 
 // Deterministic serial link, with independent frame generation and receiver ACKs.
