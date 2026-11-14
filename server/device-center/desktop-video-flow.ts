@@ -11,9 +11,10 @@ export class DesktopVideoFlow {
 	private baseline = Infinity;
 	private latestAck = 0;
 	private lastSample: number | undefined;
-	private sampleAck = Infinity;
-	private sampleDecode = Infinity;
-	private lastAdjustment = -Infinity;
+	private samples = 0;
+	private congested = 0;
+	private severe = 0;
+	private healthy = 0;
 	private good = 0;
 	private bad = 0;
 	private qualityScale = 1;
@@ -63,7 +64,7 @@ export class DesktopVideoFlow {
 		this.pendingBytes = 0;
 		// A replacement encoder has startup/keyframe latency, not steady-state load.
 		this.lastSample = undefined;
-		this.sampleAck = this.sampleDecode = Infinity;
+		this.samples = this.congested = this.severe = this.healthy = 0;
 		this.bad = this.good = 0;
 	}
 	ack(id: number, decodeQueue: number, now: number) {
@@ -91,30 +92,25 @@ export class DesktopVideoFlow {
 		this.measured = true;
 		this.baseline = Math.min(this.baseline, this.ackMs);
 		this.queueMs = Math.max(0, this.ackMs - this.baseline);
-		this.sampleAck = Math.min(this.sampleAck, this.ackMs);
-		this.sampleDecode = Math.min(this.sampleDecode, decodeQueue);
+		this.samples++;
+		if (this.queueMs > 80 || decodeQueue > 3) this.congested++;
+		if (this.queueMs > 250 || decodeQueue > 8) this.severe++;
+		if (this.queueMs < 30 && decodeQueue < 2) this.healthy++;
 		if (this.lastSample === undefined) this.lastSample = now;
 		if (now - this.lastSample < 1000) return true;
 		this.lastSample = now;
-		// ACKs arrive in bursts over mobile/WAN links. Sampling only the first
-		// ACK each second mistakes a recovered burst for persistent congestion,
-		// repeatedly reconfiguring encoders that need a restart for every change.
-		const queued = Math.max(0, this.sampleAck - this.baseline),
-			decoded = this.sampleDecode;
-		this.sampleAck = this.sampleDecode = Infinity;
-		this.bad = queued > 80 || decoded > 3 ? this.bad + 1 : 0;
-		this.good = queued < 30 && decoded < 2 ? this.good + 1 : 0;
-		if (now - this.lastAdjustment < 5000) return true;
-		// Reduce encoder bitrate first; lower capture FPS only after quality reaches its floor.
-		if (this.bad >= 3 || queued > 1000 || decoded > 16) {
+		// Neither one delayed ACK nor one timely ACK represents a whole mobile burst.
+		const severe = this.severe * 2 > this.samples;
+		this.bad = this.congested * 2 > this.samples ? this.bad + 1 : 0;
+		this.good = this.healthy >= this.samples * 0.9 ? this.good + 1 : 0;
+		this.samples = this.congested = this.severe = this.healthy = 0;
+		if (this.bad >= 2 || severe) {
 			if (this.qualityScale > 0.6) this.qualityScale = Math.max(0.6, this.qualityScale * 0.85);
 			else this.fpsScale = Math.max(0.25, this.fpsScale * 0.8);
-			this.lastAdjustment = now;
 			this.bad = this.good = 0;
 		} else if (this.good >= 30) {
 			if (this.fpsScale < 1) this.fpsScale = Math.min(1, this.fpsScale + 0.1);
 			else this.qualityScale = Math.min(1, this.qualityScale + 0.1);
-			this.lastAdjustment = now;
 			this.good = 0;
 		}
 		return true;

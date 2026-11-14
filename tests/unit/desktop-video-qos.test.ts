@@ -78,16 +78,41 @@ it("requires sustained recovery before raising quality and ignores encoder start
 	expect(flow.profile(base, true).quality).toBeGreaterThan(reduced.quality);
 });
 
-it("does not oscillate on short mobile latency spikes separated by healthy delivery", () => {
+it("reacts to mobile congestion promptly without immediately raising quality again", () => {
 	const flow = new DesktopVideoFlow(),
 		base = { fps: 60, quality: 70 };
 	let deliveredAt = 0;
-	for (let t = 0; t < 60000; t += 100) {
-		const delay = t % 12000 >= 8000 && t % 12000 < 10000 ? 650 : 330;
+	for (let t = 0; t < 10000; t += 100) {
+		const delay = t >= 8000 ? 650 : 330;
 		deliveredAt = Math.max(deliveredAt, t + delay);
 		flow.ack(flow.frame(t), 0, deliveredAt);
-		expect(flow.profile(base, true)).toEqual(base);
 	}
+	const reduced = flow.profile(base, true);
+	expect(reduced.quality).toBeLessThan(base.quality);
+	for (let t = 10000; t < 20000; t += 100) flow.ack(flow.frame(t), 0, t + 330);
+	expect(flow.profile(base, true).quality).toBeLessThanOrEqual(reduced.quality);
+});
+
+it("does not let a minority of timely ACKs hide delayed delivery for most frames", () => {
+	const flow = new DesktopVideoFlow(),
+		base = { fps: 240, quality: 70 };
+	for (let t = 0; t < 1000; t += 100) flow.ack(flow.frame(t), 0, t + 50);
+	let deliveredAt = 0;
+	for (let t = 1000; t < 6000; t += 100) {
+		const delay = t % 1000 < 600 ? 400 : 50;
+		deliveredAt = Math.max(deliveredAt, t + delay);
+		flow.ack(flow.frame(t), 0, deliveredAt);
+	}
+	expect(flow.profile(base, true).quality).toBeLessThan(base.quality);
+});
+
+it("does not impose a five-second cooldown on sustained severe queueing", () => {
+	const flow = new DesktopVideoFlow(),
+		base = { fps: 240, quality: 70 };
+	for (let t = 0; t < 1000; t += 100) flow.ack(flow.frame(t), 0, t + 30);
+	for (let t = 1000; t < 7000; t += 100) flow.ack(flow.frame(t), 10, t + 500);
+	expect(flow.profile(base, true).quality).toBe(42);
+	expect(flow.profile(base, true).fps).toBeLessThan(240);
 });
 
 // Deterministic serial link, with independent frame generation and receiver ACKs.
