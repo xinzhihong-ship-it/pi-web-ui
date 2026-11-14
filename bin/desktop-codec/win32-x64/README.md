@@ -7,6 +7,16 @@ texture, scale and convert on the GPU, then encode on NVIDIA NVENC, AMD AMF or I
 QSV. The encoder uses the GPU that owns the selected output. Failures retain the
 existing hardware and software fallback paths. Runtime metadata is `native-d3d11`.
 
+An explicit D3D11 pixel shader scales RGB and writes the NV12 luma/chroma planes
+using the BT.709 matrix, without vendor video-processor gamma/enhancement changes.
+The H.264 VUI carries matching BT.709 primaries, sRGB transfer and the selected
+limited/full SDR range. QSV mapped frames retain these properties. Both ranges
+use hardware encoding; full range is still lossy 8-bit 4:2:0, not RGB 4:4:4 or HDR.
+The shader uses the Windows D3DCompiler system library. If the GPU cannot render
+NV12 planes, the existing compatibility encoder fallback remains available.
+Resolution changes (up to a 4096-pixel edge on this path) and range changes reopen
+only the encoder, preserving the authenticated viewer connection and last image.
+
 `scripts/build-ffmpeg-compat.mjs` builds the pinned FFmpeg and vendor dependencies;
 `scripts/build-native-desktop-codec.mjs` links this adapter against those static
 libraries. `PI_FFMPEG_BUILD_DIR` optionally selects an existing build directory.

@@ -57,6 +57,9 @@ if (process.platform !== "win32") {
 		].map((file) => resolve("bin/desktop-service", file)),
 	]);
 	const cases = [
+		['{"type":"configure","maxEdge":4096,"quality":70,"fps":60,"colorRange":"full"}', false, true],
+		['{"type":"configure","maxEdge":4097,"quality":70,"fps":60}', false, false],
+		['{"type":"configure","maxEdge":1920,"quality":70,"fps":60,"colorRange":"hdr"}', false, false],
 		['{"type":"video_flow","paused":true}', false, true],
 		['{"type":"video_flow","paused":"true"}', false, false],
 		['{"type":"video_flow","paused":false,"command":"calc"}', true, false],

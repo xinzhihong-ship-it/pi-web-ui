@@ -18,7 +18,7 @@ export function windowsDesktopServicePath(): string | undefined {
 /** Bind capability to the installed binary, so an old/rolled-back service receives no new commands. */
 export function windowsDesktopServiceProfiles(
 	path: string,
-	capability: "profile-v2" | "raw-v1" | "video-v1" | "video-flow-v1" = "profile-v2",
+	capability: "profile-v2" | "raw-v1" | "video-v1" | "video-flow-v1" | "display-options-v1" = "profile-v2",
 ): boolean {
 	try {
 		return (

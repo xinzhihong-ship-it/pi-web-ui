@@ -14,7 +14,7 @@ using System.Web.Script.Serialization;
 internal static class DesktopUserVideo {
     static string Owner { get { return File.ReadAllText(Path.Combine(Path.GetDirectoryName(typeof(DesktopUserVideo).Assembly.Location),"owner.sid")).Trim(); } }
     sealed class State { public volatile bool Ended;public Exception Error;public long LastPacket,LastFrame; }
-    static string Profile(NativeDesktop.VideoSettings s) { return new JavaScriptSerializer().Serialize(new {type="configure",maxEdge=s.Edge,quality=s.Quality,fps=s.Fps}); }
+    static string Profile(NativeDesktop.VideoSettings s) { return new JavaScriptSerializer().Serialize(new {type="configure",maxEdge=s.Edge,quality=s.Quality,fps=s.Fps,colorRange=s.ColorRange}); }
     static string Display(NativeDesktop.VideoSettings s) { return new JavaScriptSerializer().Serialize(new {type="display",id=s.DisplayId}); }
     static Dictionary<string,object> Message(string line,string expected) {
         if(line==null||!PiDesktopService.Allowed(line,false)) throw new IOException("Invalid user capture configuration");
@@ -35,7 +35,7 @@ internal static class DesktopUserVideo {
                 profile=Message(PiDesktopService.ReadLine(pipe,16384),"configure");
                 display=Message(PiDesktopService.ReadLine(pipe,16384),"display");
             }
-            NativeDesktop.InitializeVideo((string)display["id"],Convert.ToInt32(profile["maxEdge"]),Convert.ToInt32(profile["quality"]),Convert.ToInt32(profile["fps"]));
+            NativeDesktop.InitializeVideo((string)display["id"],Convert.ToInt32(profile["maxEdge"]),Convert.ToInt32(profile["quality"]),Convert.ToInt32(profile["fps"]),profile.ContainsKey("colorRange")?(string)profile["colorRange"]:"limited");
             NativeDesktop.Run(true,false,true,false,pipe,pipe,message=>PiDesktopService.ErrorPacket(pipe,message),false,()=>{
                 while(!NativeDesktop.VideoStopped) if(!DesktopHardware.StreamUser(NativeDesktop.ReadVideoSettings())) return;
             });
@@ -75,7 +75,8 @@ internal static class DesktopUserVideo {
             if(value==null||!value.TryGetValue("type",out type)||!Equals(type,"displays")||!value.TryGetValue("encoder",out codec))throw new IOException("Invalid user capture metadata");
             if(Equals(codec,"")) return; // Initial display enumeration, before the codec starts.
             if(!value.TryGetValue("capture",out capture)||!Equals(capture,"wgc")||!value.TryGetValue("encoderRuntime",out runtime)||!Equals(runtime,"native-d3d11")||!(Equals(codec,"h264_amf")||Equals(codec,"h264_nvenc")||Equals(codec,"h264_qsv")))throw new IOException("Invalid user capture backend");
-            NativeDesktop.VideoBackend("wgc",(string)codec,"native-d3d11");return;
+            object range;
+            NativeDesktop.VideoBackend("wgc",(string)codec,"native-d3d11",value.TryGetValue("colorRange",out range)&&Equals(range,"full")?"full":"limited");return;
         }
         throw new IOException("Unsupported user capture packet");
     }

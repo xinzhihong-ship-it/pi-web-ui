@@ -187,6 +187,9 @@ if($hasEncoder) {
     [IO.File]::WriteAllText($videoStaged,(Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash,[Text.Encoding]::ASCII)
     Move-Item -LiteralPath $videoStaged -Destination (Join-Path $installDir 'video-v1') -Force
 }
+$displayStaged=Join-Path $installDir 'display-options-v1.new'
+[IO.File]::WriteAllText($displayStaged,(Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash,[Text.Encoding]::ASCII)
+Move-Item -LiteralPath $displayStaged -Destination (Join-Path $installDir 'display-options-v1') -Force
 $sourceStaged=Join-Path $installDir 'source.sha256.new'
 $flowStaged=Join-Path $installDir 'video-flow-v1.new'
 if(Test-Path -LiteralPath $flowStaged) { Remove-Item -LiteralPath $flowStaged -Force }
