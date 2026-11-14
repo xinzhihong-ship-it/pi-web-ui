@@ -18,6 +18,10 @@ export function automaticHttps(publicUrl, platform = process.platform) {
 	}
 }
 export function secureHubSettings(saved, publicUrl) {
+	if (saved.PI_DEVICE_HUB_PATH_ACCESS === "0")
+		throw Error(
+			"Managed HTTPS requires path-based device access. Keep an external TLS proxy for legacy per-device ports.",
+		);
 	const source = publicUrl || saved.PI_DEVICE_HUB_PUBLIC_URL;
 	const url = new URL(source);
 	if (url.origin !== source || url.username || url.password || !["http:", "https:"].includes(url.protocol))
@@ -45,6 +49,26 @@ export function secureHubSettings(saved, publicUrl) {
 			PI_DEVICE_HUB_HTTPS: "managed",
 		},
 	};
+}
+// Called only while the owned Hub is stopped. Preserve allocations and aliases, including changes
+// made after a failed HTTPS start; rollback changes the origin, never restores an old data snapshot.
+export async function migratePortalOrigin(dataDir, previous, next) {
+	const path = join(dataDir, "device-portals.json");
+	let text;
+	try {
+		text = await readFile(path, "utf8");
+	} catch (error) {
+		if (error.code === "ENOENT") return false;
+		throw error;
+	}
+	const registry = JSON.parse(text);
+	if (registry.version !== 1 || !Array.isArray(registry.ports) || !Array.isArray(registry.allocations))
+		throw Error("Invalid device portal registry; refusing HTTPS migration");
+	if (registry.publicUrl === next) return false;
+	if (registry.publicUrl !== previous) throw Error("Device portal origin does not match the installed Hub");
+	registry.publicUrl = next;
+	writeAtomicFileSync(path, JSON.stringify(registry), { nonce: randomUUID(), mode: 0o600 });
+	return true;
 }
 async function privileged(file, signal) {
 	const script = fileURLToPath(new URL("./hub-https-install.mjs", import.meta.url));
@@ -94,10 +118,17 @@ export async function enableHubHttps({
 	log("Configuring trusted HTTPS and automatic certificate renewal. Administrator access may be requested.");
 	await install(file, signal);
 	const save = async (text) => writeAtomicFileSync(plan.config, text, { nonce: randomUUID(), mode: 0o600 });
+	let migrated = false;
 	try {
 		signal?.throwIfAborted();
+		for (const args of plan.commands.stop) run(plan.manager, args);
+		migrated = await migratePortalOrigin(
+			saved.PI_DEVICE_HUB_DATA_DIR,
+			saved.PI_DEVICE_HUB_PUBLIC_URL,
+			settings.PI_DEVICE_HUB_PUBLIC_URL,
+		);
 		await save(JSON.stringify(settings, null, 2) + "\n");
-		for (const args of plan.commands.restart) run(plan.manager, args);
+		for (const args of plan.commands.start) run(plan.manager, args);
 		await wait(settings);
 		const response = await verify(settings.PI_DEVICE_HUB_PUBLIC_URL + "/health", {
 			signal: AbortSignal.timeout(15000),
@@ -108,8 +139,15 @@ export async function enableHubHttps({
 		log("HTTPS ready: " + settings.PI_DEVICE_HUB_PUBLIC_URL);
 		return settings;
 	} catch (error) {
+		for (const args of plan.commands.stop) run(plan.manager, args);
+		if (migrated)
+			await migratePortalOrigin(
+				saved.PI_DEVICE_HUB_DATA_DIR,
+				settings.PI_DEVICE_HUB_PUBLIC_URL,
+				saved.PI_DEVICE_HUB_PUBLIC_URL,
+			);
 		await save(original);
-		for (const args of plan.commands.restart) run(plan.manager, args);
+		for (const args of plan.commands.start) run(plan.manager, args);
 		await wait(saved, true);
 		throw Error(
 			"HTTPS verification failed; restored the previous Hub configuration. Check public TCP 443/cloud firewall and certificate trust. " +

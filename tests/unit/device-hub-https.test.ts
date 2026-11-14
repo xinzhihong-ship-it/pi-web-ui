@@ -12,6 +12,7 @@ import { httpsPlan, httpsUnits, certificateCommand } from "../../bin/hub-https-i
 import { secureHubSettings, enableHubHttps } from "../../bin/hub-https.mjs";
 import { startHttpsGateway, startAcmeGateway } from "../../bin/hub-https-gateway.mjs";
 import { parseHubArgs } from "../../bin/device-hub-cli.mjs";
+import { DevicePortals } from "../../server/device-center/device-portals.js";
 const cleanup: Array<() => unknown | Promise<unknown>> = [];
 afterEach(async () => {
 	for (const fn of cleanup.splice(0).reverse()) await fn();
@@ -53,34 +54,52 @@ it("preserves bindings/settings during migration and restores the prior configur
 		PI_DEVICE_HUB_PUBLIC_URL: "http://203.0.113.10:8790",
 		PI_DEVICE_HUB_PORT: "8790",
 		PI_DEVICE_HUB_INSTANCE_ID: "owned",
-		PI_DEVICE_HUB_DATA_DIR: "/data/keep",
+		PI_DEVICE_HUB_DATA_DIR: root,
 		PI_DEVICE_HUB_ALLOW_REGISTRATION: "0",
 	};
 	const original = JSON.stringify(saved);
 	await writeFile(config, original);
+	const portals = await DevicePortals.open(root, saved.PI_DEVICE_HUB_PUBLIC_URL, [], { pathAccess: true });
+	await portals.assign("device-a", "account", "laptop");
 	const result = secureHubSettings(saved);
 	expect(result.settings.PI_DEVICE_HUB_PUBLIC_URL).toBe("https://203.0.113.10");
 	expect(JSON.parse(result.settings.PI_DEVICE_HUB_LEGACY_ORIGINS)).toEqual([saved.PI_DEVICE_HUB_PUBLIC_URL]);
-	expect(result.settings.PI_DEVICE_HUB_DATA_DIR).toBe("/data/keep");
+	expect(result.settings.PI_DEVICE_HUB_DATA_DIR).toBe(root);
 	const run = vi.fn(),
 		install = vi.fn(),
-		wait = vi.fn();
+		wait = vi.fn(async (settings) => {
+			const registry = await DevicePortals.open(root, settings.PI_DEVICE_HUB_PUBLIC_URL, [], { pathAccess: true });
+			expect(registry.getAlias("device-a")).toBe("laptop");
+			expect(registry.getOrigin("device-a")).toBe(settings.PI_DEVICE_HUB_PUBLIC_URL + "/device/device-a/");
+		});
 	await expect(
 		enableHubHttps({
-			plan: { root, config, manager: "systemctl", commands: { restart: [["--user", "restart", "hub"]] } },
+			plan: {
+				root,
+				config,
+				manager: "systemctl",
+				commands: { stop: [["--user", "stop", "hub"]], start: [["--user", "start", "hub"]] },
+			},
 			probe: async () => ({ instanceId: "owned" }),
 			install,
 			wait,
 			run,
 			log: () => {},
 			verify: async () => {
+				const registry = await DevicePortals.open(root, result.settings.PI_DEVICE_HUB_PUBLIC_URL, [], {
+					pathAccess: true,
+				});
+				await registry.assign("device-b", "account", "new-device");
 				throw Error("Untrusted certificate");
 			},
 		} as any),
 	).rejects.toThrow("restored");
 	expect(await readFile(config, "utf8")).toBe(original);
-	expect(run).toHaveBeenCalledTimes(2);
+	expect(run).toHaveBeenCalledTimes(4);
 	expect(install).toHaveBeenCalledTimes(1);
+	const restored = await DevicePortals.open(root, saved.PI_DEVICE_HUB_PUBLIC_URL, [], { pathAccess: true });
+	expect(restored.getAlias("device-a")).toBe("laptop");
+	expect(restored.getAlias("device-b")).toBe("new-device");
 });
 it("serves only regular ACME challenge files and rejects traversal and management paths", async () => {
 	const root = await mkdtemp(join(tmpdir(), "hub-acme-"));
