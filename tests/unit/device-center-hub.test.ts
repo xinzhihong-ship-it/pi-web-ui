@@ -695,9 +695,11 @@ describe("device center hub", () => {
 			toolName: "read",
 			text: "reading files",
 		});
+		// 两条事件是两次独立写入：只等「有内容」会在 status 落盘、progress 还没跟上时提前返回，
+		// 高并发下必鞭。等到的条件必须和下面的断言一致（两条都在）。
 		const populated = await vi.waitFor(async () => {
 			const page = await request(`/api/rooms/${room.id}/tasks/${task.id}/journal`, undefined, cookie);
-			if (page.body.items.length === 0) throw new Error("journal not appended yet");
+			if (page.body.items.length < 2) throw new Error("journal not appended yet");
 			return page;
 		});
 		expect(populated.body.items.map((item: { type: string }) => item.type)).toEqual(["status", "progress"]);

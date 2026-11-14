@@ -20,8 +20,17 @@ it("keeps source FPS stable across delayed delivery without inventing video ACK 
 		canvas: { width: 1920, height: 1080 },
 		$: (id: string) => elements[id],
 		t: () => "{captureFps}/{sendFps}; draw={fps}; ack={ackMs}",
+		// 下面只执行页面里 updateStatistics 那一段，页面级状态与相邻函数都不在切片内，
+		// 因此「函数体读到的每一个外部名字」都必须在这里给出。加字段时请同步补：
+		//   colorSupported / actualColorRange —— 页面级协议状态（默认 false / limited）；
+		//   resolutionStatus —— 每次刷统计顺带刷「当前画面」标签的无关 DOM 副作用，
+		//   这里中和掉，避免用例随另一块 UI 的改动变红（下方仍校验页面里真有定义）。
+		colorSupported: false,
+		actualColorRange: "limited",
+		resolutionStatus: () => true,
 	};
 	const page = desktopPage();
+	expect(page).toContain("function resolutionStatus(");
 	runInNewContext(page.slice(page.indexOf("function updateStatistics("), page.indexOf("function connect()")), context);
 	const stats = { captured: 120, sent: 120, replaced: 0, ackMs: 0, queued: 0, elapsedMs: 2000, ackMeasured: false };
 	context.updateStatistics(stats);
