@@ -18,6 +18,11 @@ describe("desktop settings persistence", () => {
 			fps: 240,
 			scale: false,
 			viewOnly: true,
+			resolution: "custom",
+			width: 3840,
+			height: 2160,
+			colorRange: "full",
+			diagnostics: false,
 		});
 		expect(desktopPreferences(scope).read()).toEqual({
 			clipboard: "both",
@@ -26,11 +31,25 @@ describe("desktop settings persistence", () => {
 			fps: 240,
 			scale: false,
 			viewOnly: true,
+			resolution: "custom",
+			width: 3840,
+			height: 2160,
+			colorRange: "full",
+			diagnostics: false,
 		});
 		expect(desktopPreferences(JSON.stringify(["https://hub.example", "mac-b"])).read()).toEqual({});
 		desktopPreferences(scope).write({ clipboard: "bogus", fps: -1, scale: "false", token: "must-not-save" });
 		expect(desktopPreferences(scope).read().fps).toBe(240);
 		expect([...values.values()].join()).not.toContain("must-not-save");
+		expect(
+			desktopPreferences(scope).clean({
+				resolution: "9999x9999",
+				width: NaN,
+				height: "1080",
+				colorRange: "hdr",
+				diagnostics: 1,
+			}),
+		).toEqual({});
 	});
 	it("keeps transfer errors and progress distinct from disabling sync", () => {
 		expect(clipboardStatus("warning:clipboard-space", true)).toContain("同步仍开启");

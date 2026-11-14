@@ -10,7 +10,7 @@ using System.Threading;
 internal static class DesktopHardware {
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr LoadLibraryEx(string name,IntPtr file,uint flags);
     [DllImport("kernel32.dll",CharSet=CharSet.Ansi,ExactSpelling=true)] static extern IntPtr GetProcAddress(IntPtr module,string name);
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr Open(IntPtr device,int width,int height,int kbps,int fps);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr Open(IntPtr device,int width,int height,int kbps,int fps,int fullRange);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void Packet(IntPtr bytes,int size,int key,IntPtr opaque,long pts);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int Encode(IntPtr encoder,IntPtr texture,Packet callback,IntPtr opaque,long pts);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int Configure(IntPtr encoder,int kbps,int fps);
@@ -35,10 +35,10 @@ internal static class DesktopHardware {
         }
         module=LoadLibraryEx(path,IntPtr.Zero,0x00000900); // DLL directory + System32 only
         if(module==IntPtr.Zero) throw new IOException("Cannot load embedded hardware codec: "+Marshal.GetLastWin32Error());
-        open=Symbol<Open>("pi_codec_open"); encode=Symbol<Encode>("pi_codec_encode"); configure=Symbol<Configure>("pi_codec_configure"); close=Symbol<Close>("pi_codec_close");
+        open=Symbol<Open>("pi_codec_open_color"); encode=Symbol<Encode>("pi_codec_encode"); configure=Symbol<Configure>("pi_codec_configure"); close=Symbol<Close>("pi_codec_close");
     }
     static int Bitrate(NativeDesktop.VideoSettings s) {
-        return (int)((s.Edge>=2400?14000:s.Edge>=1700?9000:s.Edge>=1200?5000:2500)*Math.Max(0.6,Math.Min(1.25,s.Quality/70.0))*(s.Fps>=90?1.4:1));
+        return (int)((s.Edge>=3500?28000:s.Edge>=2400?14000:s.Edge>=1700?9000:s.Edge>=1200?5000:2500)*Math.Max(0.6,Math.Min(1.25,s.Quality/70.0))*(s.Fps>=90?1.4:1));
     }
     internal static bool Stream(NativeDesktop.VideoSettings settings) {
         try { return StreamCore(settings,true,false); }
@@ -57,7 +57,7 @@ internal static class DesktopHardware {
         using(var awake=new DisplayWake()) using(var capture=new TextureCapture(settings.Bounds,String.Equals(settings.Desktop,"Default",StringComparison.OrdinalIgnoreCase),allowUser,wgcOnly)) using(var timer=new FrameTimer()) {
             double scale=Math.Min(1,(double)settings.Edge/Math.Max(settings.Bounds.Width,settings.Bounds.Height));
             int width=Math.Max(2,(int)(settings.Bounds.Width*scale)/2*2),height=Math.Max(2,(int)(settings.Bounds.Height*scale)/2*2);
-            IntPtr encoder=open(capture.Device,width,height,Bitrate(settings),settings.Fps);
+            IntPtr encoder=open(capture.Device,width,height,Bitrate(settings),settings.Fps,settings.ColorRange=="full"?1:0);
             if(encoder==IntPtr.Zero) throw new IOException("Native hardware encoder probe failed");
             bool first=true; Exception failure=null;
             Packet packet=(bytes,size,key,opaque,pts)=>{
@@ -68,11 +68,11 @@ internal static class DesktopHardware {
                 } catch(Exception e) { failure=e; }
             };
             try {
-                NativeDesktop.VideoBackend(capture.Backend,capture.Codec,"native-d3d11");
+                NativeDesktop.VideoBackend(capture.Backend,capture.Codec,"native-d3d11",settings.ColorRange);
                 var clock=Stopwatch.StartNew(); double next=0; long heartbeat=0,waitingSince=0; int generation=NativeDesktop.VideoGeneration;
                 while(!NativeDesktop.VideoStopped) {
                     var current=NativeDesktop.ReadVideoSettings();
-                    if(current.Desktop!=settings.Desktop||current.Bounds!=settings.Bounds||current.Edge!=settings.Edge||generation!=NativeDesktop.VideoGeneration) return true;
+                    if(current.Desktop!=settings.Desktop||current.Bounds!=settings.Bounds||current.Edge!=settings.Edge||generation!=NativeDesktop.VideoGeneration||current.ColorRange!=settings.ColorRange) return true;
                     if(current.Fps!=settings.Fps||current.Quality!=settings.Quality) {
                         if(configure(encoder,Bitrate(current),current.Fps)!=0) return true;
                         settings=current; next=clock.Elapsed.TotalMilliseconds;
@@ -91,7 +91,7 @@ internal static class DesktopHardware {
                     else {
                         if(first&&clock.ElapsedMilliseconds-waitingSince>1500) {
                             capture.UseCompatible();waitingSince=clock.ElapsedMilliseconds;
-                            NativeDesktop.VideoBackend(capture.Backend,capture.Codec,"native-d3d11");
+                            NativeDesktop.VideoBackend(capture.Backend,capture.Codec,"native-d3d11",settings.ColorRange);
                         }
                         timer.Wait(1);
                     }

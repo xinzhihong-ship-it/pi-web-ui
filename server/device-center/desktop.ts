@@ -695,7 +695,7 @@ export function createDeviceDesktop({
 				}
 				if (value?.type === "configure") {
 					const preferences = parseDesktopPreferences(value);
-					if (!preferences || Object.keys(value).length !== 5) return cleanup();
+					if (!preferences || Object.keys(value).length !== (preferences.colorRange ? 6 : 5)) return cleanup();
 					if (Date.now() - lastConfigure < 200) return;
 					lastConfigure = Date.now();
 					automatic = preferences.mode === "auto";

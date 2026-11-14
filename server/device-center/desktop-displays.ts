@@ -7,6 +7,8 @@ export type DesktopDisplays = {
 	encoder?: "h264_nvenc" | "h264_qsv" | "h264_amf" | "h264_mf" | "libx264";
 	encoderRuntime?: "default" | "nvenc-12.1" | "desktop-timing-v2" | "rustdesk-hwcodec" | "native-d3d11";
 	fallback?: string;
+	maxEdge?: number;
+	colorRange?: "limited" | "full";
 };
 export function parseDesktopDisplays(value: unknown): DesktopDisplays | undefined {
 	if (!value || typeof value !== "object") return;
@@ -42,6 +44,10 @@ export function parseDesktopDisplays(value: unknown): DesktopDisplays | undefine
 	if (!ids.has(v.selected)) return;
 	return {
 		type: "displays",
+		...([2560, 4096].includes(v.maxEdge ?? 0) ? { maxEdge: v.maxEdge } : {}),
+		...(v.encoderRuntime === "native-d3d11" && ["limited", "full"].includes(v.colorRange ?? "")
+			? { colorRange: v.colorRange }
+			: {}),
 		displays: v.displays.map(({ id, width, height, primary }) => ({ id, width, height, primary })),
 		selected: v.selected,
 		...(["dxgi", "wgc", "gdi", "screencapturekit"].includes(v.capture ?? "") ? { capture: v.capture } : {}),

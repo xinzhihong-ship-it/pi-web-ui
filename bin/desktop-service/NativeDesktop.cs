@@ -161,20 +161,20 @@ public static class NativeDesktop {
   static readonly object outputGate=new object();
   static void SendPacket(byte[] bytes) { lock(outputGate) { int n=bytes.Length; byte[] h={(byte)(n>>24),(byte)(n>>16),(byte)(n>>8),(byte)n}; outputStream.Write(h,0,4); outputStream.Write(bytes,0,n); outputStream.Flush(); } }
   public sealed class VideoSettings {
-    public Rectangle Bounds; public int Edge,Quality,Fps; public string Desktop,DisplayId;
-    public string Identity { get { return Bounds.ToString()+":"+Edge+":"+Quality+":"+Fps+":"+Desktop; } }
+    public Rectangle Bounds; public int Edge,Quality,Fps; public string Desktop,DisplayId,ColorRange;
+    public string Identity { get { return Bounds.ToString()+":"+Edge+":"+Quality+":"+Fps+":"+Desktop+":"+ColorRange; } }
   }
   public static bool VideoStopped { get { return stopped; } }
   static DateTime videoDisplaysAt=DateTime.MinValue;
   public static VideoSettings ReadVideoSettings() {
     RequireDesktop(); if((DateTime.UtcNow-videoDisplaysAt).TotalSeconds>=1) { ReportDisplays(); videoDisplaysAt=DateTime.UtcNow; }
-    lock(gate) return new VideoSettings{Bounds=Bounds(),Edge=maxEdge,Quality=quality,Fps=fps,Desktop=attachedName,DisplayId=selectedDisplay};
+    lock(gate) return new VideoSettings{Bounds=Bounds(),Edge=maxEdge,Quality=quality,Fps=fps,Desktop=attachedName,DisplayId=selectedDisplay,ColorRange=colorRange};
   }
-  public static void InitializeVideo(string display,int edge,int q,int rate) {
-    if(display==null||display.Length>128||display.IndexOf('\0')>=0||edge<640||edge>2560||q<35||q>85||rate<5||rate>240) throw new Exception("Invalid initial video profile.");
-    lock(gate) { selectedDisplay=display;maxEdge=edge;quality=q;fps=rate;reportDisplayMetadata=true; }
+  public static void InitializeVideo(string display,int edge,int q,int rate,string range="limited") {
+    if(display==null||display.Length>128||display.IndexOf('\0')>=0||edge<640||edge>4096||q<35||q>85||rate<5||rate>240) throw new Exception("Invalid initial video profile.");
+    lock(gate) { selectedDisplay=display;maxEdge=edge;quality=q;fps=rate;colorRange=range;reportDisplayMetadata=true; }
   }
-  public static void VideoBackend(string backend,string encoder,string runtime="default") { captureBackend=backend; videoEncoder=encoder; videoEncoderRuntime=runtime; ReportDisplays(); }
+  public static void VideoBackend(string backend,string encoder,string runtime="default",string range="limited") { captureBackend=backend; videoEncoder=encoder; videoEncoderRuntime=runtime; videoColorRange=range; ReportDisplays(); }
   public static void VideoFallback(string reason,bool append=false) { int line=reason.IndexOfAny(new char[]{'\r','\n'}); if(line>=0) reason=reason.Substring(0,line); if(reason.Length>160) reason=reason.Substring(0,160); videoFallback=append&&videoFallback.Length>0?videoFallback+"\n"+reason:reason; if(videoFallback.Length>1024) videoFallback=videoFallback.Substring(0,1024); ReportDisplays(); }
   public static void VideoChunk(byte[] bytes,int size,bool reset) {
     if(size<1||size>65536) throw new Exception("Invalid encoded desktop chunk.");
@@ -198,7 +198,7 @@ public static class NativeDesktop {
       displays=items.ToArray(); var selected=CurrentDisplay(); selectedDisplay=selected.Id;
       if(displays.Length==0) displays=new Display[]{selected};
       var values=new List<object>(); foreach(var display in displays) values.Add(new {id=display.Id,width=display.Bounds.Width,height=display.Bounds.Height,primary=display.Primary});
-      if(reportDisplayMetadata) SendPacket(Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(new {type="displays",displays=values,selected=selected.Id,capture=captureBackend,encoder=videoEncoder,encoderRuntime=videoEncoderRuntime,fallback=videoFallback})));
+      if(reportDisplayMetadata) SendPacket(Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(new {type="displays",displays=values,selected=selected.Id,capture=captureBackend,encoder=videoEncoder,encoderRuntime=videoEncoderRuntime,fallback=videoFallback,maxEdge=videoEncoderRuntime=="native-d3d11"?4096:2560,colorRange=videoColorRange})));
     }
   }
   [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool GetUserObjectInformation(IntPtr handle,int index,StringBuilder value,int size,out int needed);
@@ -236,6 +236,7 @@ public static class NativeDesktop {
   static volatile bool stopped;
   static bool preview,rawFrames;
   static int maxEdge=1920, quality=65, fps=30;
+  static string colorRange="limited", videoColorRange="limited";
   static void Send(INPUT i) { if(SendInput(1,new INPUT[]{i},Marshal.SizeOf(typeof(INPUT)))!=1) throw new Exception("SendInput failed; Windows blocks control of elevated apps and secure desktops."); }
   static INPUT KeyInput(int code,bool down) {
     int vk=code&0xffff;
@@ -420,8 +421,9 @@ public static class NativeDesktop {
           }
           if(type=="configure"&&!preview) {
             int edge=Convert.ToInt32(e["maxEdge"]), q=Convert.ToInt32(e["quality"]), rate=Convert.ToInt32(e["fps"]);
-            if(edge<640||edge>2560||q<35||q>85||rate<5||rate>240) throw new Exception("Invalid capture profile.");
-            lock(gate) { maxEdge=edge; quality=q; fps=rate; } continue;
+            if(edge<640||edge>4096||q<35||q>85||rate<5||rate>240) throw new Exception("Invalid capture profile.");
+            string range=e.ContainsKey("colorRange")?e["colorRange"] as string:"limited"; if(range!="limited"&&range!="full") continue;
+            lock(gate) { maxEdge=edge; quality=q; fps=rate; colorRange=range; } continue;
           }
           if(!readOnly) { if(type=="release") Release(); else Apply(e); }
         }

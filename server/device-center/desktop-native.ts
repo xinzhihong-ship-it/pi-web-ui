@@ -541,7 +541,13 @@ function startNativeDesktopOnce(
 			? {
 					configure(profile: DesktopProfile) {
 						const validated = parseDesktopProfile(profile);
-						if (validated) write({ type: "configure", ...validated });
+						if (validated) {
+							if (service && !windowsDesktopServiceProfiles(service, "display-options-v1")) {
+								validated.maxEdge = Math.min(2560, validated.maxEdge);
+								delete validated.colorRange;
+							}
+							write({ type: "configure", ...validated });
+						}
 					},
 				}
 			: {}),

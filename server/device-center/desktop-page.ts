@@ -5,6 +5,7 @@ import { desktopThemeScript } from "./desktop-theme.js";
 import { desktopClipboardPageScript } from "./desktop-clipboard-page.js";
 import { desktopFilesPageScript } from "./desktop-files-page.js";
 
+import { desktopResolution } from "./desktop-resolution.js";
 import { desktopPreferencesPageScript } from "./desktop-preferences.js";
 
 export function desktopPage(): string {
@@ -13,21 +14,22 @@ export function desktopPage(): string {
 <style>
 :root{color-scheme:dark;--bg:#101318;--bg-elev:#191e25;--bg-elev2:#222a34;--border:#343d49;--text:#e6edf5;--text-dim:#a4afbf;--accent:#8bb9ff;--accent-contrast:#102039;--green:#74d6ae;--red:#ff9595;font-family:system-ui,sans-serif;background:var(--bg);color:var(--text)}
 @media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#f5f7fa;--bg-elev:#fff;--bg-elev2:#e9eef5;--border:#d1dae5;--text:#253246;--text-dim:#58677c;--accent:#3268ac;--accent-contrast:#fff;--green:#207b58;--red:#b83143}}
-*{box-sizing:border-box}body{margin:0}main{display:flex;flex-direction:column;min-width:0;min-height:0;max-width:100%;height:100dvh;overflow:hidden}p{margin:0;font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
+*{box-sizing:border-box}body{margin:0}main{position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;max-width:100%;height:100dvh;overflow:hidden}p{margin:0;font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
 button,input,summary{font:inherit;color:var(--text)}button,summary{display:inline-flex;align-items:center;justify-content:center;gap:5px;border:1px solid transparent;border-radius:7px;background:transparent;padding:6px 9px;min-height:30px;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s}button:hover:not(:disabled),summary:hover{background:var(--bg-elev2);border-color:var(--border)}button:disabled,input:disabled{opacity:.4;cursor:default}button:focus-visible,input:focus-visible,summary:focus-visible,canvas:focus-visible{outline:2px solid var(--accent);outline-offset:2px}button svg,summary svg{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 #toolbar{display:flex;align-items:center;flex:none;gap:4px;padding:6px 8px;background:var(--bg-elev);border-bottom:1px solid var(--border);font-size:12px;min-width:0;max-width:100%;position:relative}#toolbar-scroll{display:flex;align-items:center;gap:4px;min-width:0;overflow-x:auto;scrollbar-width:thin}#controls{display:flex;align-items:center;gap:3px;flex:none}#connect:not(:disabled){background:var(--accent);color:var(--accent-contrast)}#connect:disabled{display:none}#disconnect:disabled{display:none}.view-options{display:flex;gap:2px;align-items:center;border-left:1px solid var(--border);border-right:1px solid var(--border);padding:0 5px;margin:0 3px}
 #toolbar label:has(#display-source){padding:0 5px}#display-source{font:inherit;max-width:240px;min-width:0;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);padding:4px}#toolbar label{display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer;border-radius:7px;padding:6px 7px;min-height:30px}#toolbar label:has(input:checked){background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--text)}#toolbar label:hover{background:var(--bg-elev2)}input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;margin:0}details{flex:none}summary{list-style:none}summary::-webkit-details-marker{display:none}details[open]>summary{background:var(--bg-elev2);border-color:var(--border)}
 #quality-form,#setup,#text-form,#statistics{position:absolute;z-index:2;top:calc(100% + 6px);left:8px;width:min(520px,calc(100vw - 16px));max-height:calc(100dvh - 64px);overflow:auto;overscroll-behavior:contain;background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 12px 36px #0003;white-space:normal}#setup{display:grid;gap:12px}#quality-form{display:grid;gap:12px;width:min(360px,calc(100vw - 16px))}#quality-form label{display:grid;grid-template-columns:90px minmax(0,1fr);padding:0;cursor:default}#quality-form select{min-width:0;width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)}#quality-note{color:var(--text-dim);font-size:12px;line-height:1.5;margin:0}.actions{display:flex;gap:6px;flex-wrap:wrap}.actions button,#send-text{background:var(--bg-elev2);border-color:var(--border)}#hint,#statistics{color:var(--text-dim)}#text-form{display:flex;flex-wrap:wrap;gap:10px}#text-form label{width:100%;padding:0;min-height:0;cursor:default}input[type=text]{border:1px solid var(--border);border-radius:8px;background:var(--bg);padding:9px 10px;min-width:0;flex:1;width:160px}#send-text{flex:none}
+#statistics{top:calc(var(--toolbar-height,44px) + 6px);pointer-events:none;padding:10px 14px;z-index:1}#statistics[hidden]{display:none}#diagnostics[aria-pressed=true]{background:var(--bg-elev2);border-color:var(--border)}#resolution-custom[hidden]{display:none}#resolution-custom{display:grid;gap:8px}#quality-form input[type=number]{width:100%;min-width:0;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:7px}#resolution-status,#color-note{font-size:12px;color:var(--text-dim)}
 #status{display:flex;align-items:center;gap:6px;margin-left:auto;padding:0 4px;font-size:11px;white-space:nowrap;flex:none;color:var(--text-dim)}#status:before{content:'';width:6px;height:6px;border-radius:50%;background:var(--text-dim);flex:none}#status[data-connected=true]:before{background:var(--green)}#status[data-error=true]{position:absolute;z-index:1;top:calc(100% + 6px);right:8px;max-width:min(520px,calc(100% - 16px));white-space:pre-wrap;background:var(--bg-elev);color:var(--red);border:1px solid var(--border);border-radius:10px;padding:10px 12px;box-shadow:0 8px 24px #0003}#status[data-error=true]:before{background:var(--red)}#status[data-error=true]{overflow-wrap:anywhere;word-break:break-word}
 #screen{flex:1;min-width:0;min-height:0;overflow:auto;background:#000;position:relative}main:fullscreen{width:100%;height:100%;background:var(--bg)}canvas{display:block;width:100%;height:100%;object-fit:contain;touch-action:none;outline-offset:-3px}#screen.native canvas{width:auto;height:auto;max-width:none}@media(max-width:700px){#toolbar{flex-wrap:wrap;gap:2px}#toolbar-scroll{width:100%}#status{margin-left:4px;min-height:18px}#toolbar button,#toolbar summary,#toolbar label{min-height:34px}}
 ${manualClipboardCss}${clipboardDialogCss}
 </style></head><body><main>
 <header id="toolbar"><div id="toolbar-scroll"><nav id="controls"><button id="connect" disabled data-i18n="connect"></button><button id="disconnect" disabled data-i18n="disconnect"></button><button id="clipboard" type="button" aria-haspopup="dialog" data-i18n="clipboard"></button><div class="view-options"><label><input id="viewonly" type="checkbox"><span data-i18n="viewonly"></span></label><label><input id="scale" type="checkbox" checked><span data-i18n="scale"></span></label></div><label><span data-i18n="display"></span><select id="display-source" disabled><option value="" data-i18n="primaryDisplay"></option></select></label><button id="fullscreen" data-i18n="fullscreen"></button></nav>
 <details id="settings"><summary data-i18n="setup"></summary><section id="setup" aria-label="Desktop setup"><p id="setup-status" role="status" aria-live="polite"></p><div class="actions"><button id="check" data-i18n="check"></button><button id="enable" disabled data-i18n="enable"></button><button id="disable" disabled data-i18n="disable"></button></div><aside id="mac-permission-guide" hidden aria-label="macOS permissions"><p data-i18n="macGuide"></p></aside><p id="hint" data-i18n="hint"></p></section></details>
-<details id="quality-panel"><summary data-i18n="quality"></summary><section id="quality-form"><label><span data-i18n="quality"></span><select id="quality-mode"><option value="auto" data-i18n="qualityAuto"></option><option value="smooth" data-i18n="qualitySmooth"></option><option value="balanced" data-i18n="qualityBalanced"></option><option value="sharp" data-i18n="qualitySharp"></option></select></label><label><span data-i18n="resolution"></span><select id="quality-edge"><option value="0" data-i18n="resolutionAuto"></option><option value="960">960 px</option><option value="1280">1280 px</option><option value="1920">1920 px</option><option value="2560">2560 px</option></select></label><label><span data-i18n="frameRate"></span><select id="quality-fps"><option value="10">10 FPS</option><option value="15">15 FPS</option><option value="30">30 FPS</option><option value="60" selected>60 FPS</option><option value="120">120 FPS</option><option value="240">240 FPS</option></select></label><p id="quality-note" data-i18n="qualityNote"></p></section></details>
+<details id="quality-panel"><summary data-i18n="quality"></summary><section id="quality-form"><label><span data-i18n="quality"></span><select id="quality-mode"><option value="auto" data-i18n="qualityAuto"></option><option value="smooth" data-i18n="qualitySmooth"></option><option value="balanced" data-i18n="qualityBalanced"></option><option value="sharp" data-i18n="qualitySharp"></option></select></label><label><span data-i18n="resolution"></span><input id="quality-edge" type="hidden" value="0"><select id="quality-resolution"><option value="window" data-i18n="resolutionAuto"></option><option value="native" data-i18n="resolutionNative"></option><option value="4096x2160">4096 × 2160</option><option value="3840x2160">3840 × 2160</option><option value="2880x1800">2880 × 1800</option><option value="2560x1600">2560 × 1600</option><option value="2560x1440">2560 × 1440</option><option value="2048x1536">2048 × 1536</option><option value="1920x1200">1920 × 1200</option><option value="1920x1080">1920 × 1080</option><option value="1680x1050">1680 × 1050</option><option value="1600x900">1600 × 900</option><option value="1440x900">1440 × 900</option><option value="1366x768">1366 × 768</option><option value="1280x1024">1280 × 1024</option><option value="1280x800">1280 × 800</option><option value="1280x720">1280 × 720</option><option value="1024x768">1024 × 768</option><option value="800x600">800 × 600</option><option value="custom" data-i18n="resolutionCustom"></option></select></label><div id="resolution-custom" hidden><label><span data-i18n="resolutionWidth"></span><input id="quality-width" type="number" min="320" max="4096" step="1" value="1920"></label><label><span data-i18n="resolutionHeight"></span><input id="quality-height" type="number" min="320" max="4096" step="1" value="1080"></label></div><p id="resolution-status" role="status"></p><label><span data-i18n="color"></span><select id="quality-color"><option value="limited" data-i18n="colorStandard"></option><option value="full" data-i18n="colorFull"></option><option value="hdr" disabled data-i18n="colorHdr"></option></select></label><p id="color-note"></p><label><span data-i18n="frameRate"></span><select id="quality-fps"><option value="10">10 FPS</option><option value="15">15 FPS</option><option value="30">30 FPS</option><option value="60" selected>60 FPS</option><option value="120">120 FPS</option><option value="240">240 FPS</option></select></label><p id="quality-note" data-i18n="qualityNote"></p></section></details>
 <details id="text-panel"><summary data-i18n="textToggle"></summary><form id="text-form"><label for="text" data-i18n="text"></label><input id="text" type="text" disabled autocomplete="off" maxlength="2048"><button id="send-text" type="submit" disabled data-i18n="send"></button></form></details>
-<details id="diagnostics"><summary data-i18n="diagnostics"></summary><p id="statistics"></p></details></div><p id="status" role="status" aria-live="polite"></p></header>
-<div id="screen"><canvas id="canvas" width="1" height="1" tabindex="0" aria-describedby="hint"></canvas></div>
+<button id="diagnostics" aria-pressed="true" aria-controls="statistics" data-i18n="diagnostics"></button></div><p id="status" role="status" aria-live="polite"></p></header>
+<p id="statistics"></p><div id="screen"><canvas id="canvas" width="1" height="1" tabindex="0" aria-describedby="hint"></canvas></div>
 </main><script type="module">
 const appUrl = path => new URL(path, document.baseURI);
 ${desktopThemeScript()}
@@ -49,7 +51,7 @@ const messages = {
  environment:['环境变量强制启用；需在设备本机修改环境变量并重启才能停用。','Enabled by the environment; change the environment on the device and restart to disable.'],
  ready:['可以连接。','Ready to connect.'],connecting:['正在连接…','Connecting…'],waiting:['已连接，等待画面…','Connected; waiting for an image…'],
  viewing:['已连接 · 只读','Connected · view only'],controlling:['已连接 · 可控制','Connected · control enabled'],
- quality:['画质','Quality'],qualityAuto:['自动','Automatic'],qualitySmooth:['流畅','Smooth'],qualityBalanced:['均衡','Balanced'],qualitySharp:['清晰','Sharp'],resolution:['分辨率上限','Resolution limit'],resolutionAuto:['跟随窗口','Match window'],frameRate:['帧率上限','Frame rate limit'],qualityNote:['调整传输画面长边，保持屏幕比例，不改变被控电脑的显示设置。自动模式会在网络变慢时降低画质。60 / 120 / 240 是目标，实际帧率取决于两端设备、画面变化及网络；降低分辨率有助于提高帧率。','Adjusts the transmitted image’s longest edge, preserving aspect ratio and the host’s display settings. Automatic mode reduces quality on slower connections. 60/120/240 are targets; actual FPS depends on both devices, screen changes and the connection. Lower resolution can help at high frame rates.'],qualityUnsupported:['此设备暂不支持动态画质。请更新被控端；Windows 系统桌面服务也需要更新。','This device does not support dynamic quality yet. Update the host, including the Windows desktop service if installed.'],
+ quality:['画质','Quality'],qualityAuto:['自动','Automatic'],qualitySmooth:['流畅','Smooth'],qualityBalanced:['均衡','Balanced'],qualitySharp:['清晰','Sharp'],resolution:['传输分辨率','Stream resolution'],resolutionAuto:['跟随窗口','Match window'],resolutionNative:['跟随被控屏幕','Match remote display'],resolutionCustom:['自定义…','Custom…'],resolutionWidth:['宽度','Width'],resolutionHeight:['高度','Height'],resolutionInvalid:['宽和高需要是 320–4096 之间的整数。','Width and height must be integers from 320 to 4096.'],color:['色彩','Color'],colorStandard:['常规色彩（SDR）','Standard color (SDR)'],colorFull:['完整色阶（SDR）','Full range (SDR)'],colorHdr:['HDR（当前通道不支持）','HDR (unavailable on this channel)'],colorNote:['两种 SDR 模式均保留硬件编码，完整色阶使用 0–255 色阶；不等于无损真彩或 HDR。','Both SDR modes keep hardware encoding. Full range uses levels 0–255; this is not lossless RGB or HDR.'],colorUnsupported:['当前通道使用常规 SDR；完整色阶需要新版 Windows 原生硬件编码通道。','This channel uses standard SDR. Full range requires the updated Windows native hardware encoder.'],frameRate:['帧率上限','Frame rate limit'],qualityNote:['实时调整传输画面，保持屏幕比例，不改变被控电脑的显示设置。预设/自定义尺寸是画面边界，实际尺寸受原屏幕与通道上限限制。自动模式会在网络变慢时降低画质。60 / 120 / 240 是目标，实际帧率取决于两端设备、画面变化及网络；降低分辨率有助于提高帧率。','Changes stream resolution live, preserving aspect ratio and the host’s display settings. Presets/custom sizes are bounding boxes, limited by the source display and channel capability. Automatic mode reduces quality on slower connections. 60/120/240 are targets; actual FPS depends on both devices, screen changes and the connection. Lower resolution can help at high frame rates.'],qualityUnsupported:['此设备暂不支持动态画质。请更新被控端；Windows 系统桌面服务也需要更新。','This device does not support dynamic quality yet. Update the host, including the Windows desktop service if installed.'],
  diagnostics:['连接信息','Connection info'],stats:['目标上限：{target} FPS · 当前采集配置：{configured} FPS · 采集器：{backend} · 输出/发送：{captureFps}/{sendFps} FPS · 跳过旧帧：{replaced} · 确认等待：{ackMs} ms · 队列：{queued} B · 绘制：{fps} FPS · 解码绘制：{decodeMs} ms','Target limit: {target} FPS · Capture configuration: {configured} FPS · Backend: {backend} · Output/send: {captureFps}/{sendFps} FPS · Replaced: {replaced} · ACK: {ackMs} ms · Queue: {queued} B · Drawn: {fps} FPS · Decode/draw: {decodeMs} ms'],
  disconnected:['已断开。','Disconnected.'],closed:['连接已关闭','Connection closed'],connectionError:['桌面连接失败，请检查设备状态后重试。','Desktop connection failed. Check device status and retry.'],
  requestError:['状态或设置请求失败','Status or settings request failed'],decodeError:['画面解码失败','Image decoding failed'],
@@ -78,6 +80,8 @@ let activePointer = null, retryTimer, awaitingDesktop = false;
 let rendered = 0, sampleAt = performance.now(), decodeMs = 0, lastCaptured = 0, lastSent = 0, lastStatsElapsed = 0;
 let selectedDisplay = '', captureBackend = '';
 let dynamicQuality = false, qualityTimer, lastQuality = '';
+let sourceWidth=0,sourceHeight=0,resolutionLimit=2560,colorSupported=false,actualColorRange='limited',displayConfiguration='';
+const resolveDesktopResolution=(${desktopResolution.toString()});
 ${desktopClipboardPageScript()}
 ${desktopFilesPageScript()}
 $('display-source').addEventListener('change',()=>{selectedDisplay=$('display-source').value;connect()});
@@ -89,22 +93,35 @@ function updateDisplays(message){
  const select=$('display-source'),signature=JSON.stringify(message.displays);
  if(select.dataset.displays!==signature){select.replaceChildren();message.displays.forEach((display,index)=>{const option=document.createElement('option');option.value=display.id;option.textContent=t('display')+' '+(index+1)+' · '+display.width+' × '+display.height+(display.primary?' · '+t('primaryDisplay'):'');select.append(option)});select.dataset.displays=signature}
  select.disabled=false;select.value=message.selected;selectedDisplay=message.selected;
+ const source=message.displays.find(d=>d.id===message.selected);sourceWidth=source.width;sourceHeight=source.height;
+ resolutionLimit=message.maxEdge===4096?4096:2560;colorSupported=message.encoderRuntime==='native-d3d11'&&['limited','full'].includes(message.colorRange);actualColorRange=message.colorRange==='full'?'full':'limited';
+ const configuration=JSON.stringify([selectedDisplay,sourceWidth,sourceHeight,resolutionLimit,colorSupported,actualColorRange]);
+ if(configuration!==displayConfiguration){displayConfiguration=configuration;controls();updateQuality()}
  if(parent!==window)parent.postMessage({type:'desktop-displays',displays:message.displays,selected:message.selected},'*');
 }
 
+function resolutionStatus(){
+ $('resolution-custom').hidden=$('quality-resolution').value!=='custom';
+ const invalid=$('quality-resolution').value==='custom'&&(!$('quality-width').checkValidity()||!$('quality-height').checkValidity());
+ $('resolution-status').textContent=invalid?t('resolutionInvalid'):(zh?'当前画面：':'Current image: ')+(hasFrame?canvas.width+' × '+canvas.height:'—')+' · '+(zh?'通道长边上限：':'Channel edge limit: ')+resolutionLimit+' px';
+ return !invalid;
+}
 function updateQuality() {
+ const valid=resolutionStatus();
  clearTimeout(qualityTimer);
  qualityTimer = setTimeout(() => {
-  if (!dynamicQuality || !ready || socket?.readyState !== WebSocket.OPEN) return;
-  const viewportEdge = Math.max(640, Math.min(2560, Math.round(Math.max(screen.clientWidth, screen.clientHeight) * Math.min(devicePixelRatio || 1, 2))));
-  const message = {type:'configure', mode:$('quality-mode').value, maxEdge:Number($('quality-edge').value), viewportEdge, fps:Number($('quality-fps').value)};
+  if (!valid || !dynamicQuality || !ready || socket?.readyState !== WebSocket.OPEN) return;
+  const viewportEdge = Math.max(640, Math.min(resolutionLimit, Math.round(Math.max(screen.clientWidth, screen.clientHeight) * Math.min(devicePixelRatio || 1, 2))));
+  const edge=resolveDesktopResolution($('quality-resolution').value,Number($('quality-width').value),Number($('quality-height').value),sourceWidth,sourceHeight,viewportEdge,resolutionLimit);
+  if(edge===undefined)return;
+  const message = {type:'configure', mode:$('quality-mode').value, maxEdge:$('quality-resolution').value==='window'?0:edge, viewportEdge, fps:Number($('quality-fps').value),...(colorSupported?{colorRange:$('quality-color').value}:{})};
   const text = JSON.stringify(message); if(text === lastQuality) return;
   try { socket.send(text); lastQuality = text; } catch { fail(t('connectionError')); }
  }, 300);
 }
 const qualityObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(updateQuality) : null; qualityObserver?.observe(screen);
 window.addEventListener('resize', updateQuality);
-for (const id of ['quality-mode','quality-edge','quality-fps']) $(id).addEventListener('change', updateQuality);
+for (const id of ['quality-mode','quality-resolution','quality-width','quality-height','quality-color','quality-fps']) $(id).addEventListener('change', updateQuality);
 const browserSupported = !!context && typeof createImageBitmap === 'function' && typeof WebSocket === 'function';
 function status(message, error = false) { $('status').textContent = message; $('status').dataset.error = String(error); $('status').dataset.connected = String(ready && hasFrame && !error); }
 function desktopError(message) {
@@ -120,7 +137,9 @@ function controls() {
  $('connect').disabled = busy || !canConnect() || !!socket;
  $('disconnect').disabled = !socket && !awaitingDesktop;
  $('check').disabled = busy;
- for (const id of ['quality-mode','quality-edge','quality-fps']) $(id).disabled = !dynamicQuality;
+ for (const id of ['quality-mode','quality-resolution','quality-width','quality-height','quality-color','quality-fps']) $(id).disabled = !dynamicQuality;
+ $('quality-color').disabled=!dynamicQuality||!colorSupported;
+ $('color-note').textContent=t(colorSupported?'colorNote':'colorUnsupported');
  $('quality-note').textContent = t(ready && !dynamicQuality ? 'qualityUnsupported' : 'qualityNote');
  $('enable').disabled = busy || !config || config.enabled || !config.supported;
  $('disable').disabled = busy || !config?.enabled || config.environmentEnabled;
@@ -147,7 +166,7 @@ function stop() {
  ready = false; hasFrame = false; pendingFrame = null; dynamicQuality = false; lastQuality = ""; clearTimeout(qualityTimer);
  jpegFeedback = false; jpegSequence = 0;
  videoMode = false; videoState = null; videoAcceleration = ''; try { videoDecoder?.close(); } catch { /* Already closed. */ } videoDecoder = null; videoDecodeAt = 0;
- rendered = 0; lastCaptured = lastSent = lastStatsElapsed = 0; sampleAt = performance.now(); $('statistics').textContent = '';
+ rendered = 0; lastCaptured = lastSent = lastStatsElapsed = 0; sampleAt = performance.now(); $('statistics').textContent = t('waiting');
  if (previous) { previous.onmessage = previous.onopen = previous.onerror = previous.onclose = null; previous.close(); }
  context?.clearRect(0, 0, canvas.width, canvas.height); controls(); clipboardAvailable();
 }
@@ -294,7 +313,8 @@ function updateStatistics(message) {
   backend:[captureBackend,videoAcceleration].filter(Boolean).join(' / ') || '—',
   captureFps:((message.captured-lastCaptured)*1000/Math.max(1,sourceElapsed)).toFixed(1),
   sendFps:((message.sent-lastSent)*1000/Math.max(1,sourceElapsed)).toFixed(1)};
- $('statistics').textContent = t('stats').replace(/\\{(\\w+)\\}/g, (_,key) => String(values[key])) + ' · ' + canvas.width + ' × ' + canvas.height + (videoMode ? ((captureBackend.includes('Native D3D11')||captureBackend.includes('RustDesk hwcodec')) ? (zh ? ' · 按画面变化发送' : ' · Desktop updates only') : (zh ? ' · 视频帧数含重复画面' : ' · Video counts include duplicate frames')) : '');
+ resolutionStatus();
+ $('statistics').textContent = t('stats').replace(/\\{(\\w+)\\}/g, (_,key) => String(values[key])) + ' · ' + canvas.width + ' × ' + canvas.height + (colorSupported?' · '+t(actualColorRange==='full'?'colorFull':'colorStandard'):'') + (videoMode ? ((captureBackend.includes('Native D3D11')||captureBackend.includes('RustDesk hwcodec')) ? (zh ? ' · 按画面变化发送' : ' · Desktop updates only') : (zh ? ' · 视频帧数含重复画面' : ' · Video counts include duplicate frames')) : '');
  rendered = 0; sampleAt = now; lastCaptured = message.captured; lastSent = message.sent;
  lastStatsElapsed = sourceClock ? message.elapsedMs : 0;
 }
@@ -429,7 +449,9 @@ $('check').onclick = () => void update();
 $('enable').onclick = () => void update(true);
 $('disable').onclick = () => void update(false);
 $('viewonly').onchange = () => { if (socket) connect(); };
-const panels=['settings','quality-panel','text-panel','diagnostics'];
+const panels=['settings','quality-panel','text-panel'];
+$('diagnostics').onclick=()=>{const visible=$('statistics').hidden;$('statistics').hidden=!visible;$('diagnostics').setAttribute('aria-pressed',String(visible));saveDesktopPreferences()};
+const toolbarObserver=typeof ResizeObserver==='function'?new ResizeObserver(()=>document.querySelector('main').style.setProperty('--toolbar-height',$('toolbar').offsetHeight+'px')):null;toolbarObserver?.observe($('toolbar'));
 for(const id of panels) $(id).addEventListener('toggle',()=>{if($(id).open)for(const other of panels)if(other!==id)$(other).open=false});
 document.addEventListener('keydown',event=>{if(event.key==='Escape')for(const id of panels)$(id).open=false});
 document.addEventListener('pointerdown',event=>{if(!event.target.closest('details'))for(const id of panels)$(id).open=false});
@@ -438,7 +460,7 @@ $('fullscreen').onclick = async () => {
  try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.querySelector('main').requestFullscreen(); }
  catch (error) { status(t('fullscreenError') + ': ' + error.message, true); }
 };
-window.addEventListener('pagehide', () => { disposed = true; qualityObserver?.disconnect(); window.removeEventListener('resize', updateQuality); clearTimeout(qualityTimer); stop(); });
+window.addEventListener('pagehide', () => { disposed = true; qualityObserver?.disconnect(); toolbarObserver?.disconnect(); window.removeEventListener('resize', updateQuality); clearTimeout(qualityTimer); stop(); });
 ${desktopPreferencesPageScript()}
 controls(); void update(undefined, true);
 </script></body></html>`;

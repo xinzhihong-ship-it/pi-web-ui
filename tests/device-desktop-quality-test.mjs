@@ -37,7 +37,18 @@ const desktop = createDeviceDesktop({
 		start(options) {
 			const session = { closed: false, readOnly: options.readOnly };
 			sessions.push(session);
-			const timer = setInterval(() => options.onFrame(jpeg), 50);
+			const timer = setInterval(() => {
+				options.onDisplays?.({
+					type: "displays",
+					selected: "one",
+					displays: [{ id: "one", width: 3840, height: 2160, primary: true }],
+					maxEdge: 4096,
+					capture: "dxgi",
+					encoderRuntime: "native-d3d11",
+					colorRange: "limited",
+				});
+				options.onFrame(jpeg);
+			}, 50);
 			return {
 				input: (e) => inputs.push(e),
 				close() {
@@ -65,14 +76,14 @@ try {
 	await page.waitForFunction(() => !document.querySelector("#quality-mode").disabled);
 	await page.locator("#quality-panel summary").click();
 	await page.selectOption("#quality-mode", "sharp");
-	await page.selectOption("#quality-edge", "1280");
+	await page.selectOption("#quality-resolution", "1280x720");
 	await page.selectOption("#quality-fps", "15");
 	await page.waitForTimeout(700);
-	assert.deepEqual(profiles.at(-1), { maxEdge: 1280, quality: 85, fps: 15 });
+	assert.deepEqual(profiles.at(-1), { maxEdge: 1280, quality: 85, fps: 15, colorRange: "limited" });
 	assert.equal(sessions.length, connectionsBeforeQuality);
 	assert.equal(inputs.length, inputsBeforeQuality);
 	await page.selectOption("#quality-mode", "balanced");
-	await page.selectOption("#quality-edge", "0");
+	await page.selectOption("#quality-resolution", "window");
 	await page.setViewportSize({ width: 900, height: 650 });
 	await page.waitForTimeout(700);
 	assert.equal(profiles.at(-1).maxEdge, 900);
@@ -81,6 +92,36 @@ try {
 	await page.waitForTimeout(700);
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
 	assert.equal(sessions.length, connectionsBeforeQuality);
+	await page.setViewportSize({ width: 1280, height: 800 });
+	if (!(await page.locator("#quality-form").isVisible())) await page.locator("#quality-panel summary").click();
+	await page.selectOption("#quality-resolution", "custom");
+	await page.fill("#quality-width", "2560");
+	await page.fill("#quality-height", "1440");
+	await page.locator("#quality-height").press("Tab");
+	await page.waitForTimeout(800);
+	assert.equal(profiles.at(-1).maxEdge, 2560);
+	assert.equal(sessions.length, connectionsBeforeQuality);
+	await page.selectOption("#quality-resolution", "native");
+	await page.waitForTimeout(800);
+	assert.equal(profiles.at(-1).maxEdge, 3840);
+	await page.selectOption("#quality-color", "full");
+	await page.waitForTimeout(800);
+	assert.equal(profiles.at(-1).colorRange, "full");
+	assert.equal(await page.locator("#statistics").isVisible(), true);
+	await page.locator("#canvas").click();
+	assert.equal(await page.locator("#statistics").isVisible(), true);
+	await page.keyboard.press("Escape");
+	assert.equal(await page.locator("#statistics").isVisible(), true);
+	await page.locator("#diagnostics").click();
+	assert.equal(await page.locator("#statistics").isVisible(), false);
+	await page.reload();
+	await page.waitForFunction(() => document.querySelector("#status").dataset.connected === "true");
+	assert.equal(await page.locator("#statistics").isVisible(), false);
+	assert.equal(await page.locator("#quality-resolution").inputValue(), "native");
+	assert.equal(await page.locator("#quality-color").inputValue(), "full");
+	await page.locator("#diagnostics").click();
+	assert.equal(await page.locator("#statistics").isVisible(), true);
+	await page.screenshot({ path: ".safe-exec/display-options.png" });
 	await page.locator("#disconnect").click();
 	supported = false;
 	await page.locator("#connect").click();

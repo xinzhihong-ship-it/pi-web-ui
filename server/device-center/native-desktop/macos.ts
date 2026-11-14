@@ -235,7 +235,7 @@ DispatchQueue.global().async {
             continue
         }
         if type == "configure" && !preview {
-            if let edge = e["maxEdge"] as? Int, let quality = e["quality"] as? Int, let fps = e["fps"] as? Int, (640...2560).contains(edge), (35...85).contains(quality), (5...240).contains(fps) {
+            if let edge = e["maxEdge"] as? Int, let quality = e["quality"] as? Int, let fps = e["fps"] as? Int, (640...4096).contains(edge), (35...85).contains(quality), (5...240).contains(fps) {
                 lock.lock(); maxEdge = Double(edge); jpegQuality = Double(quality) / 100; captureFPS = Double(fps); lock.unlock()
             }
             continue
@@ -362,7 +362,7 @@ var cachedDisplayID: CGDirectDisplayID = 0
 var videoEncoder: VideoEncoder?
 var encoderEdge = 0.0, encoderFPS = 0.0
 func videoBitrate(edge: Double, quality: Double, fps: Double) -> Int {
-    let base: Double = edge >= 2400 ? 14_000_000 : edge >= 1700 ? 9_000_000 : edge >= 1200 ? 5_000_000 : 2_500_000
+    let base: Double = edge >= 3500 ? 28_000_000 : edge >= 2400 ? 14_000_000 : edge >= 1700 ? 9_000_000 : edge >= 1200 ? 5_000_000 : 2_500_000
     let q = min(1.25, max(0.6, quality / 0.7))
     return Int(base * q * (fps >= 90 ? 1.4 : 1))
 }
@@ -383,7 +383,7 @@ while true {
     }
     let now = ProcessInfo.processInfo.systemUptime
     if now - reportedAt >= 2 {
-        let info: [String: Any] = ["type": "displays", "capture": "screencapturekit", "selected": String(chosen), "displays": ids.map { id in ["id": String(id), "width": CGDisplayPixelsWide(id), "height": CGDisplayPixelsHigh(id), "primary": id == CGMainDisplayID()] as [String: Any] }]
+        let info: [String: Any] = ["type": "displays", "capture": "screencapturekit", "maxEdge": 4096, "selected": String(chosen), "displays": ids.map { id in ["id": String(id), "width": CGDisplayPixelsWide(id), "height": CGDisplayPixelsHigh(id), "primary": id == CGMainDisplayID()] as [String: Any] }]
         if let data = try? JSONSerialization.data(withJSONObject: info) {
             var size = UInt32(data.count).bigEndian
             FileHandle.standardOutput.write(Data(bytes: &size, count: 4)); FileHandle.standardOutput.write(data)

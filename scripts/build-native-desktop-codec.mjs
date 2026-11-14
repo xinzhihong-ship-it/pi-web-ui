@@ -50,6 +50,7 @@ const args = [
 	"-Wl,--end-group",
 	...[
 		"d3d11",
+		"d3dcompiler",
 		"dxgi",
 		"dxguid",
 		"mfuuid",
