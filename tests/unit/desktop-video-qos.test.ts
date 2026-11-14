@@ -43,3 +43,83 @@ it("reduces bitrate before FPS and recovers gradually, retaining explicit qualit
 	for (let t = 10000; t < 60000; t += 1000) flow.ack(flow.frame(t), 0, t + 12);
 	expect(flow.profile(base, true)).toEqual(base);
 });
+
+// Deterministic serial link, with independent frame generation and receiver ACKs.
+// This reproduces the HTTP Hub JPEG path without relying on the test host's LAN.
+function jpegLink(mbps: number, rtt: number, fps = 60, dropAfterMs = Infinity, slowMbps = mbps) {
+	const flow = new DesktopVideoFlow({ deliveryBudgetMs: 100 });
+	const size = 200 * 1024;
+	let nextFrame = 0,
+		candidate: number | undefined,
+		transmissionEnd = 0,
+		pendingBytes = 0,
+		peakBytes = 0;
+	let received = 0,
+		totalAge = 0,
+		stalled = false;
+	const wire: { id: number; captureAt: number; ackAt: number }[] = [];
+	for (let now = 0; now < 60_000; now++) {
+		while (wire.length && wire[0].ackAt <= now) {
+			const frame = wire.shift()!;
+			flow.ack(frame.id, 0, now);
+			pendingBytes -= size;
+			received++;
+			totalAge += now - frame.captureAt;
+		}
+		if (now >= nextFrame) {
+			candidate = now;
+			nextFrame += 1000 / fps;
+		}
+		if (candidate !== undefined && !flow.blocked(fps, size) && pendingBytes + size <= 4 * 1024 ** 2) {
+			const id = flow.frame(now, size);
+			transmissionEnd = Math.max(now, transmissionEnd) + (size * 8) / (now >= dropAfterMs ? slowMbps : mbps) / 1000;
+			wire.push({ id, captureAt: candidate, ackAt: transmissionEnd + rtt });
+			pendingBytes += size;
+			candidate = undefined;
+		}
+		peakBytes = Math.max(peakBytes, pendingBytes);
+		if (flow.progressAt !== undefined && now - flow.progressAt > 15000) {
+			stalled = true;
+			break;
+		}
+	}
+	return { peakBytes, received, averageAge: totalAge / received, stalled };
+}
+
+it("keeps slow JPEG paths live and bounds frame age instead of filling the 4 MiB safety limit", () => {
+	const slow = jpegLink(1, 100),
+		medium = jpegLink(4, 100);
+	expect(slow.stalled).toBe(false);
+	expect(slow.received).toBeGreaterThan(30);
+	expect(slow.peakBytes).toBeLessThanOrEqual(600 * 1024);
+	expect(medium.averageAge).toBeLessThan(1000);
+	expect(medium.received).toBeGreaterThan(140);
+	const changed = jpegLink(20, 100, 60, 10000, 1);
+	expect(changed.stalled).toBe(false);
+	expect(changed.averageAge).toBeLessThan(2000);
+});
+
+it("preserves LAN throughput and fills fast high-latency paths from measured delivery", () => {
+	const lan = jpegLink(100, 5),
+		wan = jpegLink(100, 180, 120);
+	expect(lan.received).toBeGreaterThan(3500);
+	expect(lan.averageAge).toBeLessThan(40);
+	// 200 KiB JPEGs on 100 Mbps top out near 61 FPS, even with 120 requested.
+	expect(wan.received).toBeGreaterThan(3500);
+	expect(wan.averageAge).toBeLessThan(350);
+});
+
+it("times out lack of valid ACK progress, not old frames while the receiver is still advancing", () => {
+	const flow = new DesktopVideoFlow({ deliveryBudgetMs: 100 });
+	const first = flow.frame(0, 1000);
+	flow.frame(1, 1000);
+	expect(flow.progressAt).toBe(0);
+	flow.ack(first, 0, 14000);
+	expect(flow.oldest).toBe(1);
+	expect(flow.progressAt).toBe(14000);
+	flow.ack(first, 0, 20000);
+	flow.ack(first + 100, 0, 21000);
+	expect(flow.progressAt).toBe(14000);
+	flow.reset();
+	expect(flow.progressAt).toBeUndefined();
+});

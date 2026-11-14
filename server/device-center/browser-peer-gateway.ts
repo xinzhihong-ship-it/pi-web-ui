@@ -16,6 +16,8 @@ export async function createBrowserPeerGateway(connection: DeviceLanConnection) 
 	let closed = false;
 	const server = net.createServer((socket) => {
 		if (closed || sockets.size >= 32) return socket.destroy();
+		// Frame delimiters and input/ACK records must not wait for Nagle's timer.
+		socket.setNoDelay(true);
 		sockets.add(socket);
 		let buffer = Buffer.alloc(0),
 			started = false,
