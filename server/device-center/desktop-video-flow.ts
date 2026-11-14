@@ -104,14 +104,14 @@ export class DesktopVideoFlow {
 		this.sampleAck = this.sampleDecode = Infinity;
 		this.bad = queued > 80 || decoded > 3 ? this.bad + 1 : 0;
 		this.good = queued < 30 && decoded < 2 ? this.good + 1 : 0;
-		if (now - this.lastAdjustment < 3000) return true;
+		if (now - this.lastAdjustment < 5000) return true;
 		// Reduce encoder bitrate first; lower capture FPS only after quality reaches its floor.
-		if (this.bad >= 2 || queued > 250 || decoded > 8) {
+		if (this.bad >= 3 || queued > 1000 || decoded > 16) {
 			if (this.qualityScale > 0.6) this.qualityScale = Math.max(0.6, this.qualityScale * 0.85);
 			else this.fpsScale = Math.max(0.25, this.fpsScale * 0.8);
 			this.lastAdjustment = now;
 			this.bad = this.good = 0;
-		} else if (this.good >= 8) {
+		} else if (this.good >= 30) {
 			if (this.fpsScale < 1) this.fpsScale = Math.min(1, this.fpsScale + 0.1);
 			else this.qualityScale = Math.min(1, this.qualityScale + 0.1);
 			this.lastAdjustment = now;

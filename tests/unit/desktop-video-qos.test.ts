@@ -34,14 +34,16 @@ it("reduces bitrate before FPS and recovers gradually, retaining explicit qualit
 	flow.ack(flow.frame(0), 0, 10);
 	flow.ack(flow.frame(1000), 9, 1400);
 	flow.ack(flow.frame(2400), 9, 2800);
+	flow.ack(flow.frame(3400), 9, 3800);
+	flow.ack(flow.frame(4400), 9, 4800);
 	expect(flow.profile(base, true).quality).toBeLessThan(70);
 	expect(flow.profile(base, true).fps).toBe(120);
-	for (let t = 4000; t < 25000; t += 1000) flow.ack(flow.frame(t), 9, t + 400);
+	for (let t = 5000; t < 45000; t += 1000) flow.ack(flow.frame(t), 9, t + 400);
 	const limited = flow.profile(base, true);
 	expect(limited.fps).toBeLessThan(120);
 	expect(limited.maxEdge).toBe(1920);
 	expect(flow.profile(base, false)).toEqual(base);
-	for (let t = 26000; t < 150000; t += 1000) flow.ack(flow.frame(t), 0, t + 12);
+	for (let t = 46000; t < 500000; t += 1000) flow.ack(flow.frame(t), 0, t + 12);
 	expect(flow.profile(base, true)).toEqual(base);
 });
 
@@ -71,7 +73,21 @@ it("requires sustained recovery before raising quality and ignores encoder start
 	for (let t = 6100; t <= 10000; t += 100) flow.ack(flow.frame(t), 0, t + 20);
 	expect(flow.profile(base, true)).toEqual(reduced);
 	for (let t = 10100; t < 25000; t += 100) flow.ack(flow.frame(t), 0, t + 20);
+	expect(flow.profile(base, true)).toEqual(reduced);
+	for (let t = 25100; t < 45000; t += 100) flow.ack(flow.frame(t), 0, t + 20);
 	expect(flow.profile(base, true).quality).toBeGreaterThan(reduced.quality);
+});
+
+it("does not oscillate on short mobile latency spikes separated by healthy delivery", () => {
+	const flow = new DesktopVideoFlow(),
+		base = { fps: 60, quality: 70 };
+	let deliveredAt = 0;
+	for (let t = 0; t < 60000; t += 100) {
+		const delay = t % 12000 >= 8000 && t % 12000 < 10000 ? 650 : 330;
+		deliveredAt = Math.max(deliveredAt, t + delay);
+		flow.ack(flow.frame(t), 0, deliveredAt);
+		expect(flow.profile(base, true)).toEqual(base);
+	}
 });
 
 // Deterministic serial link, with independent frame generation and receiver ACKs.
