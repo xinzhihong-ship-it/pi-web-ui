@@ -73,7 +73,7 @@ internal static class DesktopVideo {
     sealed class Candidate { public Output Output; public string Codec; public bool Readback,DirectTexture; public DesktopEncoderBuild Build; public string Backend { get { return Output==null?"gdi":"dxgi"; } } }
     static Candidate[] Candidates(NativeDesktop.VideoSettings settings) {
         var values=new System.Collections.Generic.List<Candidate>();
-        var output=FindOutput(settings.Bounds);
+        var output=NativeDesktop.RequiresCursorExclusion(settings.Bounds)?null:FindOutput(settings.Bounds);
         var hardware=new System.Collections.Generic.List<string>(HardwareCodecs());
         // RustDesk get_encoder_cfg: VRAM hardware -> RAM hardware -> software. A display missing
         // from DXGI (RDP/secure desktop) must not hide otherwise usable hardware encoders.
@@ -110,7 +110,7 @@ internal static class DesktopVideo {
         if(c.Output!=null) {
             // A lavfi input creates a separate device and ignores filter_hw_device. Keep the
             // capture source in the filter graph so the selected monitor's adapter is used.
-            args+="-init_hw_device d3d11va=capture:"+c.Output.Adapter+" -filter_hw_device capture -filter_complex ddagrab=output_idx="+c.Output.Index+":framerate="+s.Fps+":draw_mouse=1:dup_frames=1:output_fmt=bgra";
+            args+="-init_hw_device d3d11va=capture:"+c.Output.Adapter+" -filter_hw_device capture -filter_complex ddagrab=output_idx="+c.Output.Index+":framerate="+s.Fps+":draw_mouse=0:dup_frames=1:output_fmt=bgra";
             if(c.DirectTexture) filter="";
             else if(c.Codec=="libx264"||c.Readback) {
                 filter="hwdownload,format=bgra,scale="+w+":"+h+":flags="+scaler+desktopMatrix+",format="+(c.Codec=="libx264"?"yuv420p":"nv12,hwupload");
@@ -121,7 +121,7 @@ internal static class DesktopVideo {
             if(filter.Length>0) args+=","+filter;
             args+=" ";
         } else {
-            args+="-r "+s.Fps+" -f gdigrab -framerate "+s.Fps+" -draw_mouse 1 -offset_x "+b.Left+" -offset_y "+b.Top+" -video_size "+b.Width+"x"+b.Height+" -i desktop ";
+            args+="-r "+s.Fps+" -f gdigrab -framerate "+s.Fps+" -draw_mouse 0 -offset_x "+b.Left+" -offset_y "+b.Top+" -video_size "+b.Width+"x"+b.Height+" -i desktop ";
             filter="scale="+w+":"+h+":flags="+scaler+desktopMatrix+",format=yuv420p";
             args+="-vf "+filter+" ";
         }

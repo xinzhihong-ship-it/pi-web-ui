@@ -1,3 +1,4 @@
+import { isCursorMode, type DesktopCursorMode, type DesktopCursor } from "./desktop-cursor.js";
 import { DesktopQuality, parseDesktopPreferences, type DesktopProfile } from "./desktop-quality.js";
 import { DesktopVideoFlow } from "./desktop-video-flow.js";
 import express, { type Express } from "express";
@@ -56,6 +57,7 @@ export function desktopLocalRequest(req: IncomingMessage): boolean {
 }
 
 type CaptureOptions = {
+	onCursor?: (cursor: DesktopCursor) => void;
 	onVideoAlive?: () => void;
 	display?: string;
 	onDisplays?: (displays: DesktopDisplays) => void;
@@ -70,6 +72,7 @@ type CaptureOptions = {
 /** Video session shape handed to the viewer in the `video` control message. */
 const VIDEO_CODEC = process.platform === "darwin" ? "avc1.42E01F" : "avc1.640033";
 type Capture = {
+	setCursorMode?(mode: DesktopCursorMode): void;
 	videoFeedback?: (paused: boolean) => void;
 	requestKeyframe?: () => void;
 	input: (event: NativeDesktopInput) => void;
@@ -375,6 +378,7 @@ export function createDeviceDesktop({
 		videoRequested = false,
 		videoFeedback = false,
 		jpegFeedback = false,
+		initialCursor?: DesktopCursorMode,
 	) {
 		let fileSession: string | undefined;
 		const preview = previewFor(display);
@@ -382,6 +386,38 @@ export function createDeviceDesktop({
 		preview.liveStarted(previewKey);
 		let ended = false;
 		let capture: Capture | undefined;
+		let cursorMode: DesktopCursorMode | undefined;
+		let pendingCursor: DesktopCursor | undefined;
+		let cursorTimer: ReturnType<typeof setTimeout> | undefined;
+		const flushCursor = () => {
+			cursorTimer = undefined;
+			if (!pendingCursor || ended || failing || ws.readyState !== WebSocket.OPEN) return;
+			if (ws.bufferedAmount > 65536) {
+				cursorTimer = setTimeout(flushCursor, 50);
+				cursorTimer.unref();
+				return;
+			}
+			ws.send(JSON.stringify(pendingCursor));
+			pendingCursor = undefined;
+		};
+		const onCursor = (cursor: DesktopCursor) => {
+			if (!cursorMode || (cursor.kind === "local") !== (cursorMode === "local") || ended || failing) return;
+			if (
+				cursor.kind === "position" &&
+				cursor.shape === undefined &&
+				pendingCursor?.kind === "position" &&
+				pendingCursor.shape !== undefined
+			)
+				cursor = { ...cursor, shape: pendingCursor.shape };
+			pendingCursor = cursor;
+			if (started && !cursorTimer) flushCursor();
+		};
+		const setCursorMode = (mode: DesktopCursorMode) => {
+			if (!initialCursor || !capture?.setCursorMode || cursorMode === mode) return;
+			pendingCursor = undefined;
+			cursorMode = mode;
+			capture.setCursorMode(mode);
+		};
 		let alive = true;
 		let lastActivity = Date.now();
 		let queued = 0;
@@ -460,7 +496,16 @@ export function createDeviceDesktop({
 			if (!started) {
 				started = true;
 				clearTimeout(connectTimer);
-				ws.send(JSON.stringify({ type: "ready", dynamicQuality: Boolean(capture?.configure), video: true }));
+				ws.send(
+					JSON.stringify({
+						type: "ready",
+						dynamicQuality: Boolean(capture?.configure),
+						...(initialCursor && capture?.setCursorMode ? { cursorModes: true } : {}),
+						video: true,
+					}),
+				);
+				if (initialCursor) setCursorMode(initialCursor);
+				if (pendingCursor && !cursorTimer) flushCursor();
 			}
 			let data = frame.data;
 			if (videoFeedback) {
@@ -497,6 +542,8 @@ export function createDeviceDesktop({
 		let closeTimer: ReturnType<typeof setTimeout> | undefined;
 		let captureClosed = false;
 		const stopCapture = () => {
+			clearTimeout(cursorTimer);
+			pendingCursor = undefined;
 			if (!capture || captureClosed) return;
 			captureClosed = true;
 			capture.close();
@@ -582,10 +629,13 @@ export function createDeviceDesktop({
 					JSON.stringify({
 						type: "ready",
 						dynamicQuality: Boolean(capture?.configure),
+						...(initialCursor && capture?.setCursorMode ? { cursorModes: true } : {}),
 						...(jpegFeedback ? { jpegFeedback: 1 } : {}),
 					}),
 				);
 			}
+			if (initialCursor && !cursorMode) setCursorMode(initialCursor);
+			if (pendingCursor && !cursorTimer) flushCursor();
 			if (latestFrame) replaced++;
 			latestFrame = jpeg;
 			flushFrame();
@@ -709,6 +759,11 @@ export function createDeviceDesktop({
 					flushFrame();
 					return;
 				}
+				if (value?.type === "cursor_mode") {
+					if (Object.keys(value).length !== 2 || !isCursorMode(value.mode)) return cleanup();
+					setCursorMode(value.mode);
+					return;
+				}
 				if (value?.type === "configure") {
 					const preferences = parseDesktopPreferences(value);
 					if (!preferences || Object.keys(value).length !== (preferences.colorRange ? 6 : 5)) return cleanup();
@@ -744,6 +799,7 @@ export function createDeviceDesktop({
 				const useServiceVideo = useVideo && service && windowsDesktopServiceProfiles(service, "video-v1");
 				if (useVideo && !useServiceVideo && (!service || windowsDesktopServiceProfiles(service, "raw-v1"))) {
 					capture = startEncodedServiceDesktop({
+						onCursor,
 						readOnly,
 						display,
 						profile: quality.profile,
@@ -761,6 +817,7 @@ export function createDeviceDesktop({
 					return;
 				}
 				capture = backend.start({
+					onCursor,
 					onVideoAlive: () => {
 						if (started && !ended && !failing) armVideoStall();
 					},
@@ -776,6 +833,7 @@ export function createDeviceDesktop({
 					onError: fail,
 					onClose: () => fail("Desktop capture stopped. Check the active desktop session and system permissions."),
 				});
+				if (initialCursor) setCursorMode(initialCursor);
 				applyProfile(quality.profile);
 				if (ended || failing) stopCapture();
 			} catch (error) {
@@ -794,6 +852,7 @@ export function createDeviceDesktop({
 				return false;
 			}
 			if (url.pathname !== "/desktop-ws") return false;
+			const cursor = url.searchParams.get("cursor");
 			const reject = (code: number, reason: string) =>
 				socket.end(`HTTP/1.1 ${code} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
 			if (!allowed(req)) reject(403, "Forbidden");
@@ -813,6 +872,7 @@ export function createDeviceDesktop({
 						url.searchParams.get("video") === "1",
 						url.searchParams.get("videoFeedback") === "1",
 						url.searchParams.get("jpegFeedback") === "1",
+						isCursorMode(cursor) ? cursor : undefined,
 					),
 				);
 			return true;

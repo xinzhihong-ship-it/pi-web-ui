@@ -18,6 +18,8 @@ export function desktopPage(): string {
 *{box-sizing:border-box}body{margin:0}main{position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;max-width:100%;height:100dvh;overflow:hidden}p{margin:0;font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
 button,input,summary{font:inherit;color:var(--text)}button,summary{display:inline-flex;align-items:center;justify-content:center;gap:5px;border:1px solid transparent;border-radius:7px;background:transparent;padding:6px 9px;min-height:30px;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s}button:hover:not(:disabled),summary:hover{background:var(--bg-elev2);border-color:var(--border)}button:disabled,input:disabled{opacity:.4;cursor:default}button:focus-visible,input:focus-visible,summary:focus-visible,canvas:focus-visible{outline:2px solid var(--accent);outline-offset:2px}button svg,summary svg{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 #toolbar{display:flex;align-items:center;flex:none;gap:4px;padding:6px 8px;background:var(--bg-elev);border-bottom:1px solid var(--border);font-size:12px;min-width:0;max-width:100%;position:relative}#toolbar-scroll{display:flex;align-items:center;gap:4px;min-width:0;overflow-x:auto;scrollbar-width:thin}#controls{display:flex;align-items:center;gap:3px;flex:none}#connect:not(:disabled){background:var(--accent);color:var(--accent-contrast)}#connect:disabled{display:none}#disconnect:disabled{display:none}.view-options{display:flex;gap:2px;align-items:center;border-left:1px solid var(--border);border-right:1px solid var(--border);padding:0 5px;margin:0 3px}
+#cursor-mode{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:5px}#cursor-unavailable{margin:0;color:var(--text-dim)}
+#cursor-plane{position:absolute;pointer-events:none;overflow:hidden}#remote-cursor{position:absolute;pointer-events:none}#remote-cursor img,#remote-cursor svg{display:block;width:100%;height:100%}#remote-cursor [hidden],#cursor-plane[hidden]{display:none}#canvas.hide-cursor{cursor:none}
 #toolbar label:has(#display-source){padding:0 5px}#display-source{font:inherit;max-width:240px;min-width:0;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);padding:4px}#toolbar label{display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer;border-radius:7px;padding:6px 7px;min-height:30px}#toolbar label:has(input:checked){background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--text)}#toolbar label:hover{background:var(--bg-elev2)}input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;margin:0}details{flex:none}summary{list-style:none}summary::-webkit-details-marker{display:none}details[open]>summary{background:var(--bg-elev2);border-color:var(--border)}
 #quality-form,#setup,#text-form,#statistics{position:absolute;z-index:2;top:calc(100% + 6px);left:8px;width:min(520px,calc(100vw - 16px));max-height:calc(100dvh - 64px);overflow:auto;overscroll-behavior:contain;background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 12px 36px #0003;white-space:normal}#setup{display:grid;gap:12px}#quality-form{display:grid;gap:12px;width:min(360px,calc(100vw - 16px))}#quality-form label{display:grid;grid-template-columns:90px minmax(0,1fr);padding:0;cursor:default}#quality-form select{min-width:0;width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)}#quality-note{color:var(--text-dim);font-size:12px;line-height:1.5;margin:0}.actions{display:flex;gap:6px;flex-wrap:wrap}.actions button,#send-text{background:var(--bg-elev2);border-color:var(--border)}#hint,#statistics{color:var(--text-dim)}#text-form{display:flex;flex-wrap:wrap;gap:10px}#text-form label{width:100%;padding:0;min-height:0;cursor:default}input[type=text]{border:1px solid var(--border);border-radius:8px;background:var(--bg);padding:9px 10px;min-width:0;flex:1;width:160px}#send-text{flex:none}
 #statistics{top:calc(var(--toolbar-height,44px) + 6px);pointer-events:none;padding:10px 14px;z-index:1}#statistics[hidden]{display:none}#diagnostics[aria-pressed=true]{background:var(--bg-elev2);border-color:var(--border)}#resolution-custom[hidden]{display:none}#resolution-custom{display:grid;gap:8px}#quality-form input[type=number]{width:100%;min-width:0;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:7px}#resolution-status,#color-note{font-size:12px;color:var(--text-dim)}
@@ -27,11 +29,11 @@ button,input,summary{font:inherit;color:var(--text)}button,summary{display:inlin
 ${manualClipboardCss}${clipboardDialogCss}
 </style></head><body><main>
 <header id="toolbar"><div id="toolbar-scroll"><nav id="controls"><button id="connect" disabled data-i18n="connect"></button><button id="disconnect" disabled data-i18n="disconnect"></button><button id="clipboard" type="button" aria-haspopup="dialog" data-i18n="clipboard"></button><div class="view-options"><label><input id="viewonly" type="checkbox"><span data-i18n="viewonly"></span></label><label><input id="scale" type="checkbox" checked><span data-i18n="scale"></span></label></div><label><span data-i18n="display"></span><select id="display-source" disabled><option value="" data-i18n="primaryDisplay"></option></select></label><button id="fullscreen" data-i18n="fullscreen"></button></nav>
-<details id="settings"><summary data-i18n="setup"></summary><section id="setup" aria-label="Desktop setup"><p id="setup-status" role="status" aria-live="polite"></p><div class="actions"><button id="check" data-i18n="check"></button><button id="enable" disabled data-i18n="enable"></button><button id="disable" disabled data-i18n="disable"></button></div><aside id="mac-permission-guide" hidden aria-label="macOS permissions"><p data-i18n="macGuide"></p></aside><label><input id="map-shortcuts" type="checkbox"><span data-i18n="mapShortcuts"></span></label><p id="hint" data-i18n="hint"></p></section></details>
+<details id="settings"><summary data-i18n="setup"></summary><section id="setup" aria-label="Desktop setup"><p id="setup-status" role="status" aria-live="polite"></p><div class="actions"><button id="check" data-i18n="check"></button><button id="enable" disabled data-i18n="enable"></button><button id="disable" disabled data-i18n="disable"></button></div><aside id="mac-permission-guide" hidden aria-label="macOS permissions"><p data-i18n="macGuide"></p></aside><label><span data-i18n="cursorMode"></span><select id="cursor-mode"><option value="local" data-i18n="cursorLocal"></option><option value="remote" data-i18n="cursorRemote"></option></select></label><p id="cursor-unavailable" data-i18n="cursorUnsupported" hidden></p><label><input id="map-shortcuts" type="checkbox"><span data-i18n="mapShortcuts"></span></label><p id="hint" data-i18n="hint"></p></section></details>
 <details id="quality-panel"><summary data-i18n="quality"></summary><section id="quality-form"><label><span data-i18n="quality"></span><select id="quality-mode"><option value="auto" data-i18n="qualityAuto"></option><option value="smooth" data-i18n="qualitySmooth"></option><option value="balanced" data-i18n="qualityBalanced"></option><option value="sharp" data-i18n="qualitySharp"></option></select></label><label><span data-i18n="resolution"></span><input id="quality-edge" type="hidden" value="0"><select id="quality-resolution"><option value="window" data-i18n="resolutionAuto"></option><option value="native" data-i18n="resolutionNative"></option><option value="4096x2160">4096 × 2160</option><option value="3840x2160">3840 × 2160</option><option value="2880x1800">2880 × 1800</option><option value="2560x1600">2560 × 1600</option><option value="2560x1440">2560 × 1440</option><option value="2048x1536">2048 × 1536</option><option value="1920x1200">1920 × 1200</option><option value="1920x1080">1920 × 1080</option><option value="1680x1050">1680 × 1050</option><option value="1600x900">1600 × 900</option><option value="1440x900">1440 × 900</option><option value="1366x768">1366 × 768</option><option value="1280x1024">1280 × 1024</option><option value="1280x800">1280 × 800</option><option value="1280x720">1280 × 720</option><option value="1024x768">1024 × 768</option><option value="800x600">800 × 600</option><option value="custom" data-i18n="resolutionCustom"></option></select></label><div id="resolution-custom" hidden><label><span data-i18n="resolutionWidth"></span><input id="quality-width" type="number" min="320" max="4096" step="1" value="1920"></label><label><span data-i18n="resolutionHeight"></span><input id="quality-height" type="number" min="320" max="4096" step="1" value="1080"></label></div><p id="resolution-status" role="status"></p><label><span data-i18n="color"></span><select id="quality-color"><option value="limited" data-i18n="colorStandard"></option><option value="full" data-i18n="colorFull"></option><option value="hdr" disabled data-i18n="colorHdr"></option></select></label><p id="color-note"></p><label><span data-i18n="frameRate"></span><select id="quality-fps"><option value="0" selected data-i18n="fpsFollow"></option><option value="10">10 FPS</option><option value="15">15 FPS</option><option value="30">30 FPS</option><option value="60">60 FPS</option><option value="120">120 FPS</option><option value="240">240 FPS</option></select></label><p id="quality-note" data-i18n="qualityNote"></p></section></details>
 <details id="text-panel"><summary data-i18n="textToggle"></summary><form id="text-form"><label for="text" data-i18n="text"></label><input id="text" type="text" disabled autocomplete="off" maxlength="2048"><button id="send-text" type="submit" disabled data-i18n="send"></button></form></details>
 <button id="diagnostics" aria-pressed="true" aria-controls="statistics" data-i18n="diagnostics"></button></div><p id="status" role="status" aria-live="polite"></p></header>
-<p id="statistics"></p><div id="screen"><canvas id="canvas" width="1" height="1" tabindex="0" aria-describedby="hint"></canvas><p id="clipboard-transfer-status" role="status" hidden></p></div>
+<p id="statistics"></p><div id="screen"><canvas id="canvas" width="1" height="1" tabindex="0" aria-describedby="hint"></canvas><div id="cursor-plane" aria-hidden="true" hidden><div id="remote-cursor"><img id="cursor-image" alt="" hidden><svg id="cursor-arrow" viewBox="0 0 20 25"><path d="M1 1v20l5-5 4 8 4-2-4-8h8z" fill="white" stroke="black" stroke-width="1.5" stroke-linejoin="round"/></svg></div></div><p id="clipboard-transfer-status" role="status" hidden></p></div>
 </main><script type="module">
 const appUrl = path => new URL(path, document.baseURI);
 ${desktopThemeScript()}
@@ -42,6 +44,7 @@ const messages = {
  title:['设备远程桌面','Remote desktop'],connect:['连接','Connect'],disconnect:['断开','Disconnect'],
  check:['检查状态','Check status'],enable:['启用','Enable'],disable:['停用','Disable'],setup:['桌面设置','Desktop setup'],
  display:['显示器','Display'],primaryDisplay:['主屏','Primary display'],viewonly:['只读','View only'],scale:['适应窗口','Fit to window'],fullscreen:['全屏','Fullscreen'],
+ cursorMode:['鼠标指针','Mouse pointer'],cursorLocal:['显示本机鼠标','Show local pointer'],cursorRemote:['显示对方鼠标','Show remote pointer'],cursorUnsupported:['更新被控设备的 pi-web-ui 和桌面组件后可以切换鼠标。','Update pi-web-ui and its desktop component on the remote device to switch pointers.'],
  clipboard:['剪贴板','Clipboard'],mapShortcuts:['跨系统快捷键转换（Ctrl ↔ ⌘ / Win）','Translate Windows and Mac shortcuts (Ctrl ↔ ⌘ / Win)'],
  textToggle:['文字输入','Text input'],text:['文字输入（支持中文）','Text input (including Chinese)'],send:['发送','Send'],
  hint:['控制模式：点击画面后使用键盘；触屏可拖动，中文请用顶部文字输入发送。只读模式由服务端强制执行。','Control mode: focus the image to use the keyboard; drag with touch. Use Text input in the toolbar for composed text. View only is enforced by the server.'],
@@ -105,7 +108,7 @@ function updateDisplays(message){
  const source=message.displays.find(d=>d.id===message.selected);sourceWidth=source.width;sourceHeight=source.height;sourceRefreshHz=Number.isFinite(source.refreshHz)&&source.refreshHz>=5&&source.refreshHz<=1000?source.refreshHz:0;
  resolutionLimit=message.maxEdge===4096?4096:2560;colorSupported=message.encoderRuntime==='native-d3d11'&&['limited','full'].includes(message.colorRange);actualColorRange=message.colorRange==='full'?'full':'limited';
  const configuration=JSON.stringify([selectedDisplay,sourceWidth,sourceHeight,sourceRefreshHz,resolutionLimit,colorSupported,actualColorRange]);
- if(configuration!==displayConfiguration){displayConfiguration=configuration;controls();updateQuality()}
+ if(configuration!==displayConfiguration){displayConfiguration=configuration;controls();updateQuality();renderCursor()}
  if(parent!==window)parent.postMessage({type:'desktop-displays',displays:message.displays,selected:message.selected},'*');
 }
 
@@ -130,7 +133,50 @@ function updateQuality() {
   try { socket.send(text); lastQuality = text; } catch { fail(t('connectionError')); }
  }, 300);
 }
-const qualityObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(updateQuality) : null; qualityObserver?.observe(screen);
+let cursorSupported=false, requestedCursor='', remoteCursor=null, cursorShape=null, cursorHover=null;
+function requestCursorMode(){
+ const mode=$('cursor-mode').value;
+ if(!cursorSupported||!ready||socket?.readyState!==WebSocket.OPEN||requestedCursor===mode)return;
+ requestedCursor=mode;
+ socket.send(JSON.stringify({type:'cursor_mode',mode}));
+}
+function receiveCursor(message){
+ if(!cursorSupported||!['local','embedded','hidden','position'].includes(message.kind))return;
+ if((message.kind==='local')!==($('cursor-mode').value==='local'))return;
+ if(message.kind==='position'){
+  if(![message.x,message.y].every(n=>Number.isFinite(n)&&n>=0&&n<=1))return;
+  if(message.shape===null)cursorShape=null;
+  else if(message.shape){
+   const s=message.shape;
+   if(typeof s.png!=='string'||s.png.length>44000||![s.width,s.height].every(n=>Number.isInteger(n)&&n>0&&n<=128)||!Number.isInteger(s.hotX)||s.hotX<0||s.hotX>=s.width||!Number.isInteger(s.hotY)||s.hotY<0||s.hotY>=s.height)return;
+   cursorShape=s;$('cursor-image').src='data:image/png;base64,'+s.png;
+  }
+ }
+ remoteCursor=message;renderCursor();
+}
+function updateLocalPointer(){
+ canvas.classList.toggle('hide-cursor',Boolean(ready&&hasFrame&&remoteCursor&&remoteCursor.kind!=='local'&&cursorHover&&point(cursorHover)));
+}
+function renderCursor(){
+ updateLocalPointer();
+ const plane=$('cursor-plane'), marker=$('remote-cursor');
+ plane.hidden=!ready||!hasFrame||remoteCursor?.kind!=='position';
+ if(plane.hidden)return;
+ const bounds=imageRect(), viewport=screen.getBoundingClientRect();
+ plane.style.left=(bounds.left-viewport.left+screen.scrollLeft)+'px';plane.style.top=(bounds.top-viewport.top+screen.scrollTop)+'px';
+ plane.style.width=bounds.width+'px';plane.style.height=bounds.height+'px';
+ const sx=bounds.width/(sourceWidth||canvas.width),sy=bounds.height/(sourceHeight||canvas.height);
+ const s=cursorShape??{width:20,height:25,hotX:1,hotY:1};
+ marker.style.left=(remoteCursor.x*Math.max(0,bounds.width-sx)-s.hotX*sx)+'px';marker.style.top=(remoteCursor.y*Math.max(0,bounds.height-sy)-s.hotY*sy)+'px';
+ marker.style.width=(s.width*sx)+'px';marker.style.height=(s.height*sy)+'px';
+ $('cursor-image').hidden=!cursorShape;$('cursor-arrow').toggleAttribute('hidden',Boolean(cursorShape));
+}
+$('cursor-image').addEventListener('error',()=>{cursorShape=null;renderCursor()});
+$('cursor-mode').addEventListener('change',requestCursorMode);
+for(const name of ['pointerenter','pointermove'])canvas.addEventListener(name,event=>{cursorHover={clientX:event.clientX,clientY:event.clientY};if(remoteCursor&&remoteCursor.kind!=='local')updateLocalPointer()});
+canvas.addEventListener('pointerleave',()=>{cursorHover=null;canvas.classList.remove('hide-cursor')});
+screen.addEventListener('scroll',renderCursor,{passive:true});
+const qualityObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(()=>{updateQuality();renderCursor()}) : null; qualityObserver?.observe(screen);qualityObserver?.observe(canvas);
 window.addEventListener('resize', updateQuality);
 for (const id of ['quality-mode','quality-resolution','quality-width','quality-height','quality-color','quality-fps']) $(id).addEventListener('change', updateQuality);
 const browserSupported = !!context && typeof createImageBitmap === 'function' && typeof WebSocket === 'function';
@@ -148,6 +194,8 @@ function controls() {
  $('connect').disabled = busy || !canConnect() || !!socket;
  $('disconnect').disabled = !socket && !awaitingDesktop;
  $('check').disabled = busy;
+ $('cursor-mode').disabled=ready&&!cursorSupported;
+ $('cursor-unavailable').hidden=!ready||cursorSupported;
  for (const id of ['quality-mode','quality-resolution','quality-width','quality-height','quality-color','quality-fps']) $(id).disabled = !dynamicQuality;
  $('quality-color').disabled=!dynamicQuality||!colorSupported;
  $('color-note').textContent=t(colorSupported?'colorNote':'colorUnsupported');
@@ -178,6 +226,7 @@ function stop() {
  release(); const previous = socket; socket = null; generation++;
  filesSession = '';
  ready = false; hasFrame = false; pendingFrame = null; dynamicQuality = false; lastQuality = ""; clearTimeout(qualityTimer);
+ cursorSupported=false;requestedCursor='';remoteCursor=null;cursorShape=null;renderCursor();
  jpegFeedback = false; jpegSequence = 0; sourceRefreshHz = 0; displayConfiguration = '';
  videoMode = false; videoState = null; videoAcceleration = ''; try { videoDecoder?.close(); } catch { /* Already closed. */ } videoDecoder = null; videoDecodeAt = 0;
  rendered = 0; lastCaptured = lastSent = lastStatsElapsed = 0; sampleAt = performance.now(); $('statistics').textContent = t('waiting');
@@ -225,7 +274,7 @@ async function decodeFrames() {
     context.drawImage(bitmap, 0, 0); hasFrame = true;
     rendered++; decodeMs = Math.round(performance.now() - decodeStarted);
     frame.socket.send(JSON.stringify(frame.ack || {type:'ack'}));
-    if(firstFrame) { status(t(connectionViewOnly ? 'viewing' : 'controlling')); controls(); }
+    if(firstFrame) { renderCursor(); status(t(connectionViewOnly ? 'viewing' : 'controlling')); controls(); }
    } catch (error) {
     if (!disposed && frame.generation === generation && frame.socket === socket && socket.readyState === WebSocket.OPEN) {
      try { frame.socket.send(JSON.stringify(frame.ack || {type:'ack'})); } catch { /* Close below if the acknowledgement cannot be sent. */ }
@@ -274,7 +323,7 @@ function startVideo(codec, reset = false, framed = false) {
      decodeMs = Math.round(performance.now() - received.at);
      if (state.socket?.readyState === 1) state.socket.send(JSON.stringify({type:'video_ack',id:received.id,queue:Math.min(128,decoder.decodeQueueSize)}));
     } else if (videoDecodeAt) decodeMs = Math.round(performance.now() - videoDecodeAt);
-    if (firstFrame) { status(t(connectionViewOnly ? 'viewing' : 'controlling')); controls(); }
+    if (firstFrame) { renderCursor(); status(t(connectionViewOnly ? 'viewing' : 'controlling')); controls(); }
    },
     error: () => {
      if (!current() || videoDecoder !== decoder) return;
@@ -356,6 +405,7 @@ function connect() {
  url.searchParams.set('video', videoProbe ? '1' : '0');
  url.searchParams.set('videoFeedback', '1');
  url.searchParams.set('jpegFeedback', '1');
+ url.searchParams.set('cursor',$('cursor-mode').value);
  if(selectedDisplay) url.searchParams.set('display',selectedDisplay);
  const currentGeneration = generation;
  const openedAt = performance.now();
@@ -371,8 +421,9 @@ function connect() {
     const message = JSON.parse(event.data);
     if (message.type === 'error') fail(desktopError(message.message), typeof message.message === 'string' && desktopIssue(message.message, zh)?.retry === true);
     else if (message.type === 'video') { if (startVideo(message.codec, message.reset === true, message.framed === 1)) current.binaryType = 'arraybuffer'; else fail(t('decodeError')); }
-    else if (message.type === 'ready') { ready = true; jpegFeedback = message.jpegFeedback === 1; dynamicQuality = message.dynamicQuality === true; controls(); updateQuality(); clipboardAvailable(); }
+    else if (message.type === 'ready') { ready = true; cursorSupported=message.cursorModes===true; requestCursorMode(); jpegFeedback = message.jpegFeedback === 1; dynamicQuality = message.dynamicQuality === true; controls(); updateQuality(); clipboardAvailable(); }
     else if (message.type === 'displays') updateDisplays(message);
+    else if (message.type === 'cursor') receiveCursor(message);
     else if (message.type === 'stats') updateStatistics(message);
    } catch { fail(t('connectionError')); }
   } else if (videoMode && (typeof event.data?.byteLength === 'number' || typeof event.data?.arrayBuffer === 'function')) {
@@ -431,14 +482,17 @@ async function update(enabled, autoConnect = false) {
  } finally { busy = false; if (!disposed) controls(); }
 }
 // object-fit: contain can letterbox the canvas; normalize only the visible image.
-function point(event, clamp = false) {
- if (!hasFrame) return null;
+function imageRect() {
  const rect = canvas.getBoundingClientRect();
  const ratio = Math.min(rect.width / canvas.width, rect.height / canvas.height);
  const width = canvas.width * ratio, height = canvas.height * ratio;
- if (width <= 0 || height <= 0) return null;
- const x = (event.clientX - rect.left - (rect.width - width) / 2) / width;
- const y = (event.clientY - rect.top - (rect.height - height) / 2) / height;
+ return {left:rect.left+(rect.width-width)/2,top:rect.top+(rect.height-height)/2,width,height};
+}
+function point(event, clamp = false) {
+ if (!hasFrame) return null;
+ const rect=imageRect();
+ if (rect.width <= 0 || rect.height <= 0) return null;
+ const x=(event.clientX-rect.left)/rect.width, y=(event.clientY-rect.top)/rect.height;
  if (!clamp && (x < 0 || x > 1 || y < 0 || y > 1)) return null;
  return {x:Math.max(0, Math.min(1,x)), y:Math.max(0, Math.min(1,y))};
 }
@@ -494,7 +548,7 @@ const toolbarObserver=typeof ResizeObserver==='function'?new ResizeObserver(()=>
 for(const id of panels) $(id).addEventListener('toggle',()=>{if($(id).open)for(const other of panels)if(other!==id)$(other).open=false});
 document.addEventListener('keydown',event=>{if(event.key==='Escape')for(const id of panels)$(id).open=false});
 document.addEventListener('pointerdown',event=>{if(!event.target.closest('details'))for(const id of panels)$(id).open=false});
-$('scale').onchange = () => { screen.classList.toggle('native', !$('scale').checked); updateQuality(); };
+$('scale').onchange = () => { screen.classList.toggle('native', !$('scale').checked); updateQuality();renderCursor(); };
 $('fullscreen').onclick = async () => {
  try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.querySelector('main').requestFullscreen(); }
  catch (error) { status(t('fullscreenError') + ': ' + error.message, true); }

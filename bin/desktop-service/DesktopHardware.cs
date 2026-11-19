@@ -52,6 +52,7 @@ internal static class DesktopHardware {
     }
     internal static bool StreamUser(NativeDesktop.VideoSettings settings) { return StreamCore(settings,false,true); }
     sealed class UserCaptureRequired : Exception {}
+    sealed class CursorInSurface : Exception {}
     static bool StreamCore(NativeDesktop.VideoSettings settings,bool allowUser,bool wgcOnly) {
         Load();
         using(var awake=new DisplayWake()) using(var capture=new TextureCapture(settings.Bounds,String.Equals(settings.Desktop,"Default",StringComparison.OrdinalIgnoreCase),allowUser,wgcOnly)) using(var timer=new FrameTimer()) {
@@ -81,9 +82,16 @@ internal static class DesktopHardware {
                     if(NativeDesktop.VideoPaused) { timer.Wait(4); next=clock.Elapsed.TotalMilliseconds; detailAt=next+200; continue; }
                     double now=clock.Elapsed.TotalMilliseconds;
                     if(now<next) { timer.Wait(next-now); continue; }
-                    bool updated=capture.Read(texture=>{
-                        if(encode(encoder,texture,packet,IntPtr.Zero,clock.ElapsedMilliseconds)!=0) throw new IOException("Native hardware encoder failed");
-                    });
+                    bool updated;
+                    try {
+                        updated=capture.Read(texture=>{
+                            if(encode(encoder,texture,packet,IntPtr.Zero,clock.ElapsedMilliseconds)!=0) throw new IOException("Native hardware encoder failed");
+                        });
+                    } catch(CursorInSurface) {
+                        capture.UseCompatible(); detailLeft=0;
+                        NativeDesktop.VideoBackend(capture.Backend,capture.Codec,"native-d3d11",settings.ColorRange);
+                        continue;
+                    }
                     if(updated) { detailLeft=repeat!=null&&settings.Quality>=65?8:0; detailAt=clock.Elapsed.TotalMilliseconds+200; }
                     else if(detailLeft>0&&settings.Quality>=65&&now>=detailAt) {
                         if(repeat(encoder,packet,IntPtr.Zero,clock.ElapsedMilliseconds)!=0) detailLeft=0;
@@ -180,7 +188,7 @@ internal static class DesktopHardware {
                             int level; Marshal.ThrowExceptionForHR(D3D11CreateDevice(adapter,0,IntPtr.Zero,0x20,IntPtr.Zero,0,7,out device,out level,out context));
                             Marshal.ThrowExceptionForHR(Method<DescribeAdapter>(adapter,8)(adapter,data));
                             int vendor=Marshal.ReadInt32(data,256); Codec=vendor==0x10de?"h264_nvenc":vendor==0x8086?"h264_qsv":vendor==0x1002?"h264_amf":"unknown";
-                            if(wgcOnly) { UseCompatible();return; }
+                            if(wgcOnly||NativeDesktop.RequiresCursorExclusion(target)) { UseCompatible();return; }
                             output1=Query(output,"00cddea8-939b-4b83-a340-a685226666cc");
                             int result=Method<Duplicate>(output1,22)(output1,device,out duplication);
                             if(result<0) {
@@ -206,6 +214,7 @@ internal static class DesktopHardware {
                 FrameInfo info; int hr=acquire(duplication,0,out info,out resource);
                 if(hr==unchecked((int)0x887A0027)) return false;
                 Marshal.ThrowExceptionForHR(hr); acquired=true;
+                if(NativeDesktop.HasCompositedCursor(info.Mouse,info.Visible,bounds)) throw new CursorInSurface();
                 if(!first&&(info.Present==0||info.Frames==0)) return false;
                 texture=Query(resource,"6f15aaf2-d208-4e89-9ab4-489535d34f9c"); if(describeTexture==null) describeTexture=Method<DescribeTexture>(texture,10); TextureDesc desc; describeTexture(texture,out desc);
                 if(desc.Width!=bounds.Width||desc.Height!=bounds.Height||desc.Format!=87) throw new IOException("Desktop texture changed");

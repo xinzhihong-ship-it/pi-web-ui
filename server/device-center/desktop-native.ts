@@ -1,3 +1,4 @@
+import { parseDesktopCursor, type DesktopCursor, type DesktopCursorMode } from "./desktop-cursor.js";
 import { parseDesktopProfile, type DesktopProfile } from "./desktop-quality.js";
 import { parseDesktopDisplays, type DesktopDisplays } from "./desktop-displays.js";
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
@@ -262,6 +263,7 @@ export async function requestNativeDesktopPermissions(
 }
 
 export type NativeDesktopOptions = {
+	onCursor?: (cursor: DesktopCursor) => void;
 	onVideoAlive?: () => void;
 	onRawFrame?: (frame: { data: Buffer; width: number; height: number }, ack: () => void) => void;
 	onDisplays?: (displays: DesktopDisplays) => void;
@@ -277,6 +279,7 @@ export type NativeDesktopOptions = {
 	onVideo?: (frame: VideoFrame) => void;
 };
 export type NativeDesktopHandle = {
+	setCursorMode?(mode: DesktopCursorMode): void;
 	requestKeyframe?(): void;
 	videoFeedback?(paused: boolean): void;
 	input(event: NativeDesktopInput): void;
@@ -320,6 +323,7 @@ function startNativeDesktopOnce(
 	let videoCodec: string | undefined;
 	let videoReset = true;
 	let pendingConfiguration: object | undefined;
+	let pendingCursor: DesktopCursorMode | undefined;
 	const splitVideo = () =>
 		createH264Splitter((value) => {
 			if (value.data.length > MAX_FRAME) throw new Error("Encoded desktop frame exceeds limit.");
@@ -502,10 +506,17 @@ function startNativeDesktopOnce(
 					}
 					continue;
 				}
-				if (jpeg[0] === 123 && jpeg.length <= 8192) {
+				if (jpeg[0] === 123 && jpeg.length <= 45000) {
 					let displays: DesktopDisplays | undefined;
 					try {
-						displays = parseDesktopDisplays(JSON.parse(jpeg.toString("utf8")));
+						const message = JSON.parse(jpeg.toString("utf8"));
+						if (message?.type === "cursor") {
+							const cursor = parseDesktopCursor(message);
+							if (!cursor) return fail("Invalid desktop cursor.");
+							if (displayConfirmed) options.onCursor?.(cursor);
+							continue;
+						}
+						if (jpeg.length <= 8192) displays = parseDesktopDisplays(message);
 					} catch {}
 					if (!displays) {
 						fail("Invalid desktop display metadata.");
@@ -535,6 +546,14 @@ function startNativeDesktopOnce(
 		}
 	}
 	const handle: NativeDesktopHandle = {
+		...(!options.preview && !inputOnly && (!service || windowsDesktopServiceProfiles(service, "cursor-v1"))
+			? {
+					setCursorMode(mode: DesktopCursorMode) {
+						if (child) write({ type: "cursor_mode", mode });
+						else pendingCursor = mode;
+					},
+				}
+			: {}),
 		...(options.video &&
 		(process.platform === "darwin" || (service && windowsDesktopServiceProfiles(service, "video-flow-v1")))
 			? {
@@ -644,6 +663,7 @@ function startNativeDesktopOnce(
 				write({ type: "displays" });
 				if (options.display) write({ type: "display", id: options.display });
 			}
+			if (pendingCursor) write({ type: "cursor_mode", mode: pendingCursor });
 			if (pendingConfiguration) {
 				write(pendingConfiguration);
 				pendingConfiguration = undefined;

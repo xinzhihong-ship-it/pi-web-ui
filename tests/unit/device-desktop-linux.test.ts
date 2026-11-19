@@ -99,6 +99,30 @@ describe("Linux X11 desktop", () => {
 		session.close();
 		expect(capture.kill).toHaveBeenCalled();
 	});
+	it("switches the X11 pointer on a read-only session and acknowledges the new capture's first frame", () => {
+		const onCursor = vi.fn();
+		const session = startLinuxDesktop({ onCursor, onFrame, onClose, onError, readOnly: true });
+		const jpeg = Buffer.from([255, 216, 1, 2, 255, 217]);
+		for (const [mode, arg, kind] of [
+			["local", "0", "local"],
+			["remote", "1", "embedded"],
+		] as const) {
+			const previous = capture;
+			capture = child();
+			mocks.spawn.mockReturnValue(capture);
+			session.setCursorMode?.(mode);
+			vi.advanceTimersByTime(100);
+			const args = mocks.spawn.mock.lastCall![1];
+			expect(args[args.indexOf("-draw_mouse") + 1]).toBe(arg);
+			onCursor.mockClear();
+			previous.stdout.write(jpeg);
+			expect(onCursor).not.toHaveBeenCalled();
+			capture.stdout.write(jpeg);
+			expect(onCursor).toHaveBeenCalledWith({ type: "cursor", kind });
+		}
+		expect(mocks.execFile).not.toHaveBeenCalled();
+		session.close();
+	});
 	it("preserves numeric keypad identity through xdotool press and release", () => {
 		const handle = start(false);
 		const keys = [

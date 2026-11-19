@@ -163,6 +163,8 @@ if mode == "video-selftest" {
 var maxEdge = preview ? 640.0 : 1920.0
 var jpegQuality = 0.65
 var captureFPS = 30.0
+var cursorRevision = 0
+var requestedCursor: String? // Old viewers and preview retain the original embedded cursor.
 var requestedDisplay: CGDirectDisplayID = 0
 var activeDisplay: CGDirectDisplayID = CGMainDisplayID()
 func displayIds() -> [CGDirectDisplayID] {
@@ -275,6 +277,10 @@ DispatchQueue.global().async {
         if type == "ack" { acknowledged.signal(); continue }
         if videoMode && type == "video_flow", let paused = e["paused"] as? Bool { frames.setPaused(paused); continue }
         if videoMode && type == "video_keyframe" { frames.requestKeyframe(); continue }
+        if type == "cursor_mode" && !preview, let mode = e["mode"] as? String, mode == "local" || mode == "remote" {
+            lock.lock(); requestedCursor = mode; cursorRevision += 1; lock.unlock()
+            continue
+        }
         if type == "display" {
             if let id = e["id"] as? String, let display = UInt32(id) { lock.lock(); requestedDisplay = display; lock.unlock() }
             continue
@@ -400,7 +406,9 @@ let imageContext = CIContext(options: [.cacheIntermediates: false])
 var stream: SCStream?
 var currentDisplay: SCDisplay?
 var configuredEdge = 0.0, configuredFPS = 0.0
-func configureStream(edge: Double, fps: Double, displayID: CGDirectDisplayID) {
+var reportedCursorRevision = 0
+var configuredCursor: String?
+func configureStream(edge: Double, fps: Double, displayID: CGDirectDisplayID, cursor: String?) {
     let done = DispatchSemaphore(value: 0)
     var failure: String?
     Task {
@@ -422,12 +430,15 @@ func configureStream(edge: Double, fps: Double, displayID: CGDirectDisplayID) {
             let pixels = pixelSize(displayID), scale = min(1.0, edge / Double(max(pixels.width, pixels.height)))
             config.width = max(2, Int(Double(pixels.width) * scale) & ~1)
             config.height = max(2, Int(Double(pixels.height) * scale) & ~1)
-            config.showsCursor = true
+            config.showsCursor = cursor != "local"
             config.pixelFormat = kCVPixelFormatType_32BGRA
             config.colorSpaceName = CGColorSpace.sRGB
             config.queueDepth = 3
             config.minimumFrameInterval = preview ? CMTime(value: 3, timescale: 1) : CMTime(value: 1, timescale: CMTimeScale(fps))
-            if let active = stream { try await active.updateConfiguration(config) }
+            if let active = stream {
+                if cursor != configuredCursor { captureQueue.sync { frames.clearSource() } }
+                try await active.updateConfiguration(config)
+            }
             else {
                 let active = SCStream(filter: SCContentFilter(display: display, excludingWindows: []), configuration: config, delegate: frames)
                 try active.addStreamOutput(frames, type: .screen, sampleHandlerQueue: captureQueue)
@@ -440,7 +451,7 @@ func configureStream(edge: Double, fps: Double, displayID: CGDirectDisplayID) {
     guard done.wait(timeout: .now() + 15) == .success, failure == nil else {
         release(); fail("ScreenCaptureKit stream failed: " + (failure ?? "timeout; check Screen Recording permission."))
     }
-    configuredEdge = edge; configuredFPS = fps
+    configuredEdge = edge; configuredFPS = fps; configuredCursor = cursor
     lock.lock(); activeDisplay = displayID; lock.unlock()
 }
 var reportedAt = 0.0, lastFrameAt = 0.0
@@ -456,9 +467,16 @@ func videoBitrate(edge: Double, quality: Double, fps: Double) -> Int {
     return 1000 * Int(min(50000.0, max(600.0, baseKbps * detail * fpsFactor)).rounded())
 }
 while true {
-    lock.lock(); let edge = maxEdge, quality = jpegQuality, fps = captureFPS, requested = requestedDisplay; lock.unlock()
+    lock.lock(); let edge = maxEdge, quality = jpegQuality, fps = captureFPS, requested = requestedDisplay, cursor = requestedCursor, revision = cursorRevision; lock.unlock()
     let ids = displayIds(), chosen = ids.contains(requested) ? requested : CGMainDisplayID()
-    if edge != configuredEdge || fps != configuredFPS || currentDisplay?.displayID != chosen { configureStream(edge: edge, fps: fps, displayID: chosen) }
+    if edge != configuredEdge || fps != configuredFPS || currentDisplay?.displayID != chosen || cursor != configuredCursor {
+        let cursorChanged = cursor != configuredCursor
+        if cursorChanged { cachedPixels = nil }
+        configureStream(edge: edge, fps: fps, displayID: chosen, cursor: cursor)
+    }
+    if reportedCursorRevision != revision, let mode = cursor, let data = try? JSONSerialization.data(withJSONObject: ["type":"cursor", "kind": mode == "remote" ? "embedded" : "local"]) {
+        writePacket(data); reportedCursorRevision = revision
+    }
     let now = ProcessInfo.processInfo.systemUptime
     if now - reportedAt >= 2 {
         let displays = ids.map { id -> [String: Any] in

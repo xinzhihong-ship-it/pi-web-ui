@@ -36,7 +36,7 @@ const desktop = createDeviceDesktop({
 	native: {
 		status: () => ({ supported: true, backend: "fixture" }),
 		start(options) {
-			const session = { closed: false, readOnly: options.readOnly };
+			const session = { closed: false, readOnly: options.readOnly, cursor: options.onCursor };
 			sessions.push(session);
 			const timer = setInterval(() => {
 				options.onDisplays?.({
@@ -56,7 +56,18 @@ const desktop = createDeviceDesktop({
 					session.closed = true;
 					clearInterval(timer);
 				},
-				...(supported ? { configure: (p) => profiles.push(p) } : {}),
+				...(supported
+					? {
+							configure: (p) => profiles.push(p),
+							setCursorMode(mode) {
+								options.onCursor?.(
+									mode === "remote"
+										? { type: "cursor", kind: "position", x: 0.75, y: 0.25 }
+										: { type: "cursor", kind: "local" },
+								);
+							},
+						}
+					: {}),
 			};
 		},
 	},
@@ -134,6 +145,55 @@ try {
 	await page.locator("#diagnostics").click();
 	assert.equal(await page.locator("#statistics").isVisible(), true);
 	await page.screenshot({ path: ".safe-exec/display-options.png" });
+	const total = sessions.length;
+	await page.locator("#settings summary").click();
+	assert.equal(await page.locator("#cursor-mode").inputValue(), "local");
+	await page.selectOption("#cursor-mode", "remote");
+	await page.locator("#cursor-plane").waitFor({ state: "visible" });
+	await page.keyboard.press("Escape");
+	const plane = await page.locator("#cursor-plane").boundingBox();
+	const marker = await page.locator("#remote-cursor").boundingBox();
+	assert.ok(Math.abs(marker.x - (plane.x + plane.width * 0.75)) < 2);
+	assert.ok(Math.abs(marker.y - (plane.y + plane.height * 0.25)) < 2);
+	await page.mouse.move(plane.x + plane.width * 0.2, plane.y + plane.height * 0.7);
+	assert.equal(await page.locator("#canvas").evaluate((e) => getComputedStyle(e).cursor), "none");
+	assert.deepEqual(await page.locator("#remote-cursor").boundingBox(), marker);
+	const sprite = await page.evaluate(() => {
+		const c = document.createElement("canvas");
+		c.width = 24;
+		c.height = 30;
+		return c.toDataURL().split(",")[1];
+	});
+	sessions
+		.at(-1)
+		.cursor({
+			type: "cursor",
+			kind: "position",
+			x: 0.75,
+			y: 0.25,
+			shape: { png: sprite, width: 24, height: 30, hotX: 5, hotY: 3 },
+		});
+	await page.waitForFunction(() => document.getElementById("cursor-image").naturalWidth === 24);
+	assert.equal(await page.locator("#cursor-arrow").isHidden(), true);
+	await page.mouse.move(plane.x + 10, plane.y - 2);
+	assert.notEqual(await page.locator("#canvas").evaluate((e) => getComputedStyle(e).cursor), "none");
+	sessions.at(-1).cursor({ type: "cursor", kind: "hidden" });
+	await page.locator("#cursor-plane").waitFor({ state: "hidden" });
+	sessions.at(-1).cursor({ type: "cursor", kind: "position", x: 0.1, y: 0.8 });
+	await page.locator("#cursor-plane").waitFor({ state: "visible" });
+	await page.locator("#settings summary").click();
+	await page.selectOption("#cursor-mode", "local");
+	await page.locator("#cursor-plane").waitFor({ state: "hidden" });
+	await page.selectOption("#cursor-mode", "remote");
+	await page.locator("#cursor-plane").waitFor({ state: "visible" });
+	assert.equal(sessions.length, total);
+	await page.reload();
+	await page.locator("#cursor-plane").waitFor({ state: "visible" });
+	assert.equal(await page.locator("#cursor-mode").inputValue(), "remote");
+	sessions.at(-1).cursor({ type: "cursor", kind: "embedded" });
+	await page.locator("#cursor-plane").waitFor({ state: "hidden" });
+	await page.mouse.move(plane.x + 80, plane.y + 50);
+	assert.equal(await page.locator("#canvas").evaluate((e) => getComputedStyle(e).cursor), "none");
 	const retina = await browser.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 2 });
 	await retina.goto("http://127.0.0.1:8995/desktop");
 	await retina.waitForFunction(() => document.querySelector("#status").dataset.connected === "true");
@@ -156,6 +216,9 @@ try {
 	await page.locator("#connect").click();
 	await page.waitForFunction(() => document.querySelector("#status").dataset.connected === "true");
 	assert.equal(await page.locator("#quality-mode").isDisabled(), true);
+	assert.equal(await page.locator("#cursor-mode").isDisabled(), true);
+	assert.equal(await page.locator("#cursor-plane").isHidden(), true);
+	assert.notEqual(await page.locator("#canvas").evaluate((e) => getComputedStyle(e).cursor), "none");
 	const count = profiles.length;
 	await page.waitForTimeout(500);
 	assert.equal(profiles.length, count);
@@ -166,6 +229,7 @@ try {
 			manual: profiles[0],
 			profileChanges: profiles.length,
 			resizeWithoutReconnect: true,
+			cursorSwitchWithoutReconnect: true,
 			readOnlyInputBlocked: true,
 			oldBackendCompatible: true,
 			mobileOverflow: false,

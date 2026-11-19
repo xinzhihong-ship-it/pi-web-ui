@@ -304,6 +304,9 @@ export function startEncodedServiceDesktop(
 		source.configure?.(profile);
 	})().catch(() => fail("Could not initialize the built-in desktop video encoder."));
 	return {
+		get setCursorMode() {
+			return source?.setCursorMode;
+		},
 		videoFeedback(value) {
 			paused = value;
 		},
