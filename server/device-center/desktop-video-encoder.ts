@@ -19,7 +19,9 @@ export function encoderArguments(encoder: DesktopVideoEncoder): string[] {
 		case "h264_qsv":
 			return ["-preset", "veryfast", "-async_depth", "1", "-look_ahead", "0"];
 		case "h264_amf":
-			return ["-usage", "ultralowlatency", "-quality", "speed", "-rc", "cbr"];
+			// Some AMF drivers emit nonconforming filler NALs. The H.264 metadata filter
+			// drops the whole access unit when it cannot parse one of those fillers.
+			return ["-usage", "ultralowlatency", "-quality", "speed", "-rc", "cbr", "-filler_data", "0"];
 		case "h264_mf":
 			return ["-hw_encoding", "1", "-scenario", "display_remoting"];
 		case "libx264":
@@ -128,12 +130,14 @@ export function rawVideoArguments(
 		"pipe:0",
 		"-an",
 		"-vf",
-		"scale=trunc(iw/2)*2:trunc(ih/2)*2",
+		"scale=trunc(iw/2)*2:trunc(ih/2)*2:in_range=pc:out_range=tv:out_color_matrix=bt709",
 		"-c:v",
 		encoder,
 		...encoderArguments(encoder),
 		"-pix_fmt",
 		encoder === "libx264" ? "yuv420p" : "nv12",
+		"-bsf:v",
+		"h264_metadata=matrix_coefficients=1:video_full_range_flag=0:colour_primaries=1:transfer_characteristics=13",
 		"-b:v",
 		String(bitrate),
 		"-maxrate",

@@ -251,8 +251,8 @@ describe("native desktop lifecycle and framed capture", () => {
 			{ type: "display", id: "secondary" },
 		]);
 		const displays = [
-			{ id: "primary", width: 1920, height: 1080, primary: true },
-			{ id: "secondary", width: 2560, height: 1440, primary: false },
+			{ id: "primary", width: 1920, height: 1080, primary: true, refreshHz: 0 },
+			{ id: "secondary", width: 2560, height: 1440, primary: false, refreshHz: 143.98 },
 		];
 		child.stdout.write(packet(Buffer.from(JSON.stringify({ type: "displays", displays, selected: "primary" }))));
 		child.stdout.write(packet());
@@ -266,6 +266,9 @@ describe("native desktop lifecycle and framed capture", () => {
 		vi.advanceTimersByTime(10_000);
 		expect(opts.onError).not.toHaveBeenCalled();
 		expect(onDisplays).toHaveBeenCalledTimes(3);
+		const reported = onDisplays.mock.calls.at(-1)![0].displays;
+		expect(reported[0]).not.toHaveProperty("refreshHz");
+		expect(reported[1].refreshHz).toBe(143.98);
 		session.close();
 		child.emit("close", 0);
 	});

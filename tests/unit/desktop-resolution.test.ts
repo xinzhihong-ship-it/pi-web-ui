@@ -15,7 +15,7 @@ describe("live stream resolution", () => {
 	it("fits letterboxing and retains native text detail near 1:1 without upscaling", () => {
 		expect(desktopViewportEdge(1600, 950, 1, 1920, 1080, "auto", 4096)).toBe(1920);
 		expect(desktopViewportEdge(1600, 950, 1, 1920, 1080, "smooth", 4096)).toBe(1600);
-		expect(desktopViewportEdge(900, 1400, 1, 1920, 1080, "sharp", 4096)).toBe(900);
+		expect(desktopViewportEdge(900, 1400, 1, 1920, 1080, "sharp", 4096)).toBe(1350);
 		expect(desktopViewportEdge(850, 600, 2, 1920, 1080, "sharp", 4096)).toBe(1920);
 		expect(desktopViewportEdge(1920, 1080, 2, 3840, 2160, "auto", 2560)).toBe(2560);
 	});

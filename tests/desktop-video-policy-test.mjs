@@ -52,7 +52,7 @@ class CaptureTest {
   Check(!direct.Contains("-f lavfi")&&!direct.Contains("hwdownload")&&!direct.Contains("scale_d3d11"),"Native-size NVIDIA capture must keep the original GPU texture");
   foreach(string codec in new string[]{"h264_nvenc","h264_amf","h264_qsv","h264_mf"}) {
    string fallback=Args(codec,true,false,false,1280);
-   Check(fallback.Contains("ddagrab=")&&fallback.Contains("scale=1280:720:flags=fast_bilinear,format=nv12,hwupload"),"Hardware fallback must retain DXGI and upload NV12 textures: "+codec);
+   Check(fallback.Contains("ddagrab=")&&fallback.Contains("scale=1280:720:flags=fast_bilinear:in_range=pc:out_range=tv:out_color_matrix=bt709,format=nv12,hwupload"),"Hardware fallback must retain DXGI and upload correctly converted NV12 textures: "+codec);
    Check(!fallback.Contains("gdigrab"),"Video processor failure must not require GDI");
    if(codec=="h264_qsv") Check(fallback.Contains("hwmap=derive_device=qsv"),"Intel must derive a matching QSV device");
   }
@@ -60,7 +60,7 @@ class CaptureTest {
   Check(scaled.Contains("scale_d3d11=width=1280:height=720:format=nv12"),"Hardware scaling remains preferred");
   Check(scaled.Contains("matrix_coefficients=1:video_full_range_flag=0"),"GPU-converted NV12 must advertise the matching BT.709 limited range");
   Check(!direct.Contains("matrix_coefficients"),"Preserve the direct BGRA encoder's color conversion");
-  Check(!Args("h264_amf",true,false,false,1280).Contains("matrix_coefficients"),"Do not relabel CPU-converted pixels");
+  Check(Args("h264_amf",true,false,false,1280).Contains("colour_primaries=1:transfer_characteristics=13"),"Explicit CPU BT.709 conversion must carry SDR desktop transfer metadata");
   Check(!Args("h264_amf",false,false,false,1280,false).Contains("matrix_coefficients"),"Do not relabel the stock runtime's color conversion");
   string software=Args("libx264",false,false,false,1280);
   Check(software.Contains("format=yuv420p")&&!software.Contains("hwupload"),"Software encoding accepts CPU pixels");

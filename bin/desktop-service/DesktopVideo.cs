@@ -104,6 +104,7 @@ internal static class DesktopVideo {
         int w=Math.Max(2,(int)(b.Width*scale)/2*2),h=Math.Max(2,(int)(b.Height*scale)/2*2);
         int bitrate=1000*BitrateKbps(Math.Max(w,h),s.Quality,s.Fps);
         string scaler=s.Quality>=75?"lanczos":"fast_bilinear";
+        const string desktopMatrix=":in_range=pc:out_range=tv:out_color_matrix=bt709";
         string args="-hide_banner -loglevel error -nostdin -flags low_delay -filter_threads 2 -filter_complex_threads 2 -probesize 32 -analyzeduration 0 ";
         string filter;
         if(c.Output!=null) {
@@ -112,7 +113,7 @@ internal static class DesktopVideo {
             args+="-init_hw_device d3d11va=capture:"+c.Output.Adapter+" -filter_hw_device capture -filter_complex ddagrab=output_idx="+c.Output.Index+":framerate="+s.Fps+":draw_mouse=1:dup_frames=1:output_fmt=bgra";
             if(c.DirectTexture) filter="";
             else if(c.Codec=="libx264"||c.Readback) {
-                filter="hwdownload,format=bgra,scale="+w+":"+h+":flags="+scaler+",format="+(c.Codec=="libx264"?"yuv420p":"nv12,hwupload");
+                filter="hwdownload,format=bgra,scale="+w+":"+h+":flags="+scaler+desktopMatrix+",format="+(c.Codec=="libx264"?"yuv420p":"nv12,hwupload");
             } else filter="scale_d3d11=width="+w+":height="+h+":format=nv12";
             // D3D11 NVENC sessions require texture input; CPU frames must be uploaded again.
             // This preserves DXGI capture when the driver's GPU video processor is unavailable.
@@ -121,7 +122,7 @@ internal static class DesktopVideo {
             args+=" ";
         } else {
             args+="-r "+s.Fps+" -f gdigrab -framerate "+s.Fps+" -draw_mouse 1 -offset_x "+b.Left+" -offset_y "+b.Top+" -video_size "+b.Width+"x"+b.Height+" -i desktop ";
-            filter="scale="+w+":"+h+":flags="+scaler+",format=yuv420p";
+            filter="scale="+w+":"+h+":flags="+scaler+desktopMatrix+",format=yuv420p";
             args+="-vf "+filter+" ";
         }
         // gdigrab timestamps use microseconds; never let the muxer turn that timebase into a
@@ -129,13 +130,13 @@ internal static class DesktopVideo {
         args+="-an -enc_time_base 1:"+s.Fps+" -fps_mode passthrough -c:v "+c.Codec+" ";
         if(c.Codec=="h264_nvenc") args+="-preset p1 -tune ull -rc cbr -zerolatency 1 ";
         else if(c.Codec=="h264_qsv") args+="-preset veryfast -async_depth 1 -look_ahead 0 ";
-        else if(c.Codec=="h264_amf") args+="-usage ultralowlatency -quality speed ";
+        else if(c.Codec=="h264_amf") args+="-usage ultralowlatency -quality speed -filler_data 0 ";
         else if(c.Codec=="h264_mf") args+="-hw_encoding 1 -scenario display_remoting -rate_control cbr ";
         else args+="-preset ultrafast -tune zerolatency -threads "+Math.Min(8,Environment.ProcessorCount)+" -x264-params repeat-headers=1:aud=1:scenecut=0 ";
         // AUDs delimit pictures without waiting for the next full encoded frame.
         string metadata="h264_metadata=aud=insert";
-        if(c.Output!=null&&c.Build==DesktopEncoderBuild.NvidiaCompatible&&!c.DirectTexture&&!c.Readback&&c.Codec!="libx264")
-            metadata+=":matrix_coefficients=1:video_full_range_flag=0";
+        if(c.Output==null||c.Readback||c.Codec=="libx264"||(!c.DirectTexture&&c.Build==DesktopEncoderBuild.NvidiaCompatible))
+            metadata+=":matrix_coefficients=1:video_full_range_flag=0:colour_primaries=1:transfer_characteristics=13";
         // A half-second VBV permits large periodic IDRs that block the ordered WAN
         // stream. Budget 100 ms, retaining the requested average bitrate and FPS.
         return args+"-b:v "+bitrate+" -maxrate "+bitrate+" -bufsize "+(bitrate/10)+" -g "+s.Fps+" -bf 0 -bsf:v "+metadata+" -flush_packets 1 -f h264 pipe:1";

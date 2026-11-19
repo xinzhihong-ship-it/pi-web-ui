@@ -25,7 +25,8 @@ const jpeg = Buffer.from(
 const profiles = [],
 	inputs = [],
 	sessions = [];
-let supported = true;
+let supported = true,
+	refreshHz = 144;
 const app = express();
 const desktop = createDeviceDesktop({
 	app,
@@ -41,7 +42,7 @@ const desktop = createDeviceDesktop({
 				options.onDisplays?.({
 					type: "displays",
 					selected: "one",
-					displays: [{ id: "one", width: 3840, height: 2160, primary: true }],
+					displays: [{ id: "one", width: 3840, height: 2160, primary: true, refreshHz }],
 					maxEdge: 4096,
 					capture: "dxgi",
 					encoderRuntime: "native-d3d11",
@@ -75,6 +76,16 @@ try {
 	const inputsBeforeQuality = inputs.length;
 	await page.waitForFunction(() => !document.querySelector("#quality-mode").disabled);
 	await page.locator("#quality-panel summary").click();
+	assert.equal(await page.locator("#quality-fps").inputValue(), "0");
+	await page.waitForFunction(() => document.querySelector("#statistics").textContent.includes("144 Hz"));
+	assert.equal(profiles.at(-1).fps, 144);
+	refreshHz = 165;
+	await page.waitForFunction(() => document.querySelector("#statistics").textContent.includes("165 Hz"));
+	assert.equal(profiles.at(-1).fps, 165);
+	await page.selectOption("#quality-fps", "240");
+	refreshHz = 60;
+	await page.waitForFunction(() => document.querySelector("#statistics").textContent.includes("60 Hz"));
+	assert.equal(profiles.at(-1).fps, 240);
 	await page.selectOption("#quality-mode", "sharp");
 	await page.selectOption("#quality-resolution", "1280x720");
 	await page.selectOption("#quality-fps", "15");
@@ -119,9 +130,27 @@ try {
 	assert.equal(await page.locator("#statistics").isVisible(), false);
 	assert.equal(await page.locator("#quality-resolution").inputValue(), "native");
 	assert.equal(await page.locator("#quality-color").inputValue(), "full");
+	assert.equal(await page.locator("#quality-fps").inputValue(), "15");
 	await page.locator("#diagnostics").click();
 	assert.equal(await page.locator("#statistics").isVisible(), true);
 	await page.screenshot({ path: ".safe-exec/display-options.png" });
+	const retina = await browser.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 2 });
+	await retina.goto("http://127.0.0.1:8995/desktop");
+	await retina.waitForFunction(() => document.querySelector("#status").dataset.connected === "true");
+	await retina.locator("#scale").uncheck();
+	await retina.waitForFunction(
+		() => document.querySelector("canvas").getBoundingClientRect().width * devicePixelRatio === 640,
+	);
+	const bounds = await retina.locator("canvas").boundingBox();
+	await retina.mouse.click(bounds.x + bounds.width * 0.75, bounds.y + bounds.height * 0.25);
+	await retina.waitForTimeout(400);
+	assert.equal(profiles.at(-1).maxEdge, 3840);
+	assert.ok(
+		inputs.some(
+			(e) => e.type === "pointer" && e.action === "down" && Math.abs(e.x - 0.75) < 0.01 && Math.abs(e.y - 0.25) < 0.01,
+		),
+	);
+	await retina.close();
 	await page.locator("#disconnect").click();
 	supported = false;
 	await page.locator("#connect").click();

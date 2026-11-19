@@ -142,7 +142,17 @@ public static class NativeDesktop {
   static bool systemDesktop;
   static Stream inputStream, outputStream;
   static Action<string> reportError;
-  sealed class Display { public string Id; public Rectangle Bounds; public bool Primary; }
+  sealed class Display { public string Id; public Rectangle Bounds; public bool Primary; public int? RefreshHz; }
+  // Fixed part of Unicode DEVMODEW. The display query does not request driver-private data.
+  [StructLayout(LayoutKind.Explicit, Size=220)] struct DisplayMode {
+    [FieldOffset(68)] public ushort Size;
+    [FieldOffset(184)] public uint Frequency;
+  }
+  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern bool EnumDisplaySettings(string device,int index,ref DisplayMode mode);
+  static int? DisplayRefresh(string device) {
+    var mode=new DisplayMode { Size=(ushort)Marshal.SizeOf(typeof(DisplayMode)) };
+    return EnumDisplaySettings(device,-1,ref mode)&&mode.Frequency>=5&&mode.Frequency<=1000 ? (int?)mode.Frequency : null;
+  }
   [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] struct MonitorInfo { public int Size,Left,Top,Right,Bottom,WorkLeft,WorkTop,WorkRight,WorkBottom,Flags; [MarshalAs(UnmanagedType.ByValTStr,SizeConst=32)] public string Device; }
   delegate bool MonitorCallback(IntPtr monitor,IntPtr dc,IntPtr rect,IntPtr data);
   [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc,IntPtr clip,MonitorCallback callback,IntPtr data);
@@ -195,11 +205,11 @@ public static class NativeDesktop {
   public static int VideoGeneration { get { return Interlocked.CompareExchange(ref videoGeneration,0,0); } }
   static void ReportDisplays() {
     var items=new List<Display>();
-    EnumDisplayMonitors(IntPtr.Zero,IntPtr.Zero,(monitor,dc,rect,data)=>{var info=new MonitorInfo();info.Size=Marshal.SizeOf(info);if(GetMonitorInfo(monitor,ref info)&&info.Right>info.Left&&info.Bottom>info.Top)items.Add(new Display{Id=info.Device,Bounds=Rectangle.FromLTRB(info.Left,info.Top,info.Right,info.Bottom),Primary=(info.Flags&1)!=0});return items.Count<32;},IntPtr.Zero);
+    EnumDisplayMonitors(IntPtr.Zero,IntPtr.Zero,(monitor,dc,rect,data)=>{var info=new MonitorInfo();info.Size=Marshal.SizeOf(info);if(GetMonitorInfo(monitor,ref info)&&info.Right>info.Left&&info.Bottom>info.Top)items.Add(new Display{Id=info.Device,Bounds=Rectangle.FromLTRB(info.Left,info.Top,info.Right,info.Bottom),Primary=(info.Flags&1)!=0,RefreshHz=DisplayRefresh(info.Device)});return items.Count<32;},IntPtr.Zero);
     lock(gate) {
       displays=items.ToArray(); var selected=CurrentDisplay(); selectedDisplay=selected.Id;
       if(displays.Length==0) displays=new Display[]{selected};
-      var values=new List<object>(); foreach(var display in displays) values.Add(new {id=display.Id,width=display.Bounds.Width,height=display.Bounds.Height,primary=display.Primary});
+      var values=new List<object>(); foreach(var display in displays) values.Add(new {id=display.Id,width=display.Bounds.Width,height=display.Bounds.Height,primary=display.Primary,refreshHz=display.RefreshHz});
       if(reportDisplayMetadata) SendPacket(Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(new {type="displays",displays=values,selected=selected.Id,capture=captureBackend,encoder=videoEncoder,encoderRuntime=videoEncoderRuntime,fallback=videoFallback,maxEdge=videoEncoderRuntime=="native-d3d11"?4096:2560,colorRange=videoColorRange})));
     }
   }
@@ -403,7 +413,9 @@ public static class NativeDesktop {
     // Input-only helpers drive the H.264 capture backend: no frames, no display probing.
     if(captureEnabled) { Thread capture=new Thread(()=>{
       if(videoCapture==null) { Capture(); return; }
+      bool preciseTimer=timeBeginPeriod(1)==0;
       try { videoCapture(); } catch(Exception e) { if(!stopped) { lock(outputGate) reportError("WINDOWS_DESKTOP_UNAVAILABLE: "+e.Message); } stopped=true; Release(); Environment.Exit(1); }
+      finally { if(preciseTimer) timeEndPeriod(1); }
     }); capture.IsBackground=true; capture.Start(); }
     try {
       using(var reader=new StreamReader(inputStream,new UTF8Encoding(false))) {

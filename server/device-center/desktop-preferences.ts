@@ -21,7 +21,7 @@ export function desktopPreferences(scope: string) {
 			out: DesktopPreferences = {};
 		if (["auto", "smooth", "balanced", "sharp"].includes(v.quality!)) out.quality = v.quality;
 		if ([0, 960, 1280, 1920, 2560].includes(v.edge!)) out.edge = v.edge;
-		if ([10, 15, 30, 60, 120, 240].includes(v.fps!)) out.fps = v.fps;
+		if ([0, 10, 15, 30, 60, 120, 240].includes(v.fps!)) out.fps = v.fps;
 		if (
 			["window", "native", "custom"].includes(v.resolution ?? "") ||
 			(typeof v.resolution === "string" &&

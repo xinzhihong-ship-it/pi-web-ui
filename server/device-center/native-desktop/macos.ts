@@ -1,6 +1,7 @@
 export const macDesktopScript = String.raw`
 import Foundation
 import CoreGraphics
+import AppKit
 import Carbon
 import ImageIO
 import ApplicationServices
@@ -51,6 +52,19 @@ final class VideoEncoder {
             compressionSessionOut: &created)
         guard status == noErr, let session = created else { fail("Cannot create H.264 encoder (\(status)).") }
         self.session = session
+        let primaries = kCVImageBufferColorPrimaries_ITU_R_709_2
+        let transfer = kCVImageBufferTransferFunction_sRGB
+        let matrix = kCVImageBufferYCbCrMatrix_ITU_R_709_2
+        // The incoming desktop is rendered to sRGB by ScreenCaptureKit. Keep both
+        // RGB-to-YUV conversion and the H.264 color description in that same space.
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_PixelTransferProperties, value: [
+            kVTPixelTransferPropertyKey_DestinationColorPrimaries: primaries,
+            kVTPixelTransferPropertyKey_DestinationTransferFunction: transfer,
+            kVTPixelTransferPropertyKey_DestinationYCbCrMatrix: matrix
+        ] as CFDictionary)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ColorPrimaries, value: primaries)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_TransferFunction, value: transfer)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_YCbCrMatrix, value: matrix)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_Baseline_AutoLevel)
@@ -159,6 +173,13 @@ func displayIds() -> [CGDirectDisplayID] {
 func pixelSize(_ id: CGDirectDisplayID) -> (width: Int, height: Int) {
     if let mode = CGDisplayCopyDisplayMode(id) { return (mode.pixelWidth, mode.pixelHeight) }
     return (CGDisplayPixelsWide(id), CGDisplayPixelsHigh(id))
+}
+func displayRefresh(_ id: CGDirectDisplayID) -> Double? {
+    if let hz = CGDisplayCopyDisplayMode(id)?.refreshRate, hz >= 5 && hz <= 1000 { return (hz * 100).rounded() / 100 }
+    // Variable-refresh modes can report zero. AppKit supplies the supported ceiling.
+    let screen = NSScreen.screens.first { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == id }
+    guard let hz = screen?.maximumFramesPerSecond, (5...1000).contains(hz) else { return nil }
+    return Double(hz)
 }
 // Only an explicit local permission action may trigger TCC or open Settings.
 // Use the same Swift process identity as capture and input injection.
@@ -403,6 +424,7 @@ func configureStream(edge: Double, fps: Double, displayID: CGDirectDisplayID) {
             config.height = max(2, Int(Double(pixels.height) * scale) & ~1)
             config.showsCursor = true
             config.pixelFormat = kCVPixelFormatType_32BGRA
+            config.colorSpaceName = CGColorSpace.sRGB
             config.queueDepth = 3
             config.minimumFrameInterval = preview ? CMTime(value: 3, timescale: 1) : CMTime(value: 1, timescale: CMTimeScale(fps))
             if let active = stream { try await active.updateConfiguration(config) }
@@ -441,7 +463,9 @@ while true {
     if now - reportedAt >= 2 {
         let displays = ids.map { id -> [String: Any] in
             let pixels = pixelSize(id)
-            return ["id": String(id), "width": pixels.width, "height": pixels.height, "primary": id == CGMainDisplayID()]
+            var item: [String: Any] = ["id": String(id), "width": pixels.width, "height": pixels.height, "primary": id == CGMainDisplayID()]
+            if let hz = displayRefresh(id) { item["refreshHz"] = hz }
+            return item
         }
         let info: [String: Any] = ["type": "displays", "capture": "screencapturekit", "maxEdge": 4096, "selected": String(chosen), "displays": displays]
         if let data = try? JSONSerialization.data(withJSONObject: info) { writePacket(data) }

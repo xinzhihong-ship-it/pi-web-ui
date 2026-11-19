@@ -12,7 +12,9 @@ export function desktopViewportEdge(
 	let pixels = Math.max(width, height) * dpr;
 	if (sourceWidth > 0 && sourceHeight > 0) {
 		pixels = Math.min(1, Math.min(width / sourceWidth, height / sourceHeight) * dpr) * nativeEdge;
-		if ((mode === "auto" || mode === "sharp") && pixels >= nativeEdge * 0.8) pixels = nativeEdge;
+		// In Sharp mode give the viewer extra source samples for antialiased glyphs at fit-to-window sizes.
+		if (mode === "sharp") pixels = Math.min(nativeEdge, pixels * 1.5);
+		else if (mode === "auto" && pixels >= nativeEdge * 0.8) pixels = nativeEdge;
 	}
 	return Math.max(640, Math.min(limit, Math.round(pixels)));
 }
