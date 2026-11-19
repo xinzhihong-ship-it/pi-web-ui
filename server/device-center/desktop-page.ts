@@ -5,7 +5,8 @@ import { desktopThemeScript } from "./desktop-theme.js";
 import { desktopClipboardPageScript } from "./desktop-clipboard-page.js";
 import { desktopFilesPageScript } from "./desktop-files-page.js";
 
-import { desktopResolution } from "./desktop-resolution.js";
+import { desktopKeyboard } from "./desktop-keyboard.js";
+import { desktopResolution, desktopViewportEdge } from "./desktop-resolution.js";
 import { desktopPreferencesPageScript } from "./desktop-preferences.js";
 
 export function desktopPage(): string {
@@ -22,14 +23,15 @@ button,input,summary{font:inherit;color:var(--text)}button,summary{display:inlin
 #statistics{top:calc(var(--toolbar-height,44px) + 6px);pointer-events:none;padding:10px 14px;z-index:1}#statistics[hidden]{display:none}#diagnostics[aria-pressed=true]{background:var(--bg-elev2);border-color:var(--border)}#resolution-custom[hidden]{display:none}#resolution-custom{display:grid;gap:8px}#quality-form input[type=number]{width:100%;min-width:0;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:7px}#resolution-status,#color-note{font-size:12px;color:var(--text-dim)}
 #status{display:flex;align-items:center;gap:6px;margin-left:auto;padding:0 4px;font-size:11px;white-space:nowrap;flex:none;color:var(--text-dim)}#status:before{content:'';width:6px;height:6px;border-radius:50%;background:var(--text-dim);flex:none}#status[data-connected=true]:before{background:var(--green)}#status[data-error=true]{position:absolute;z-index:1;top:calc(100% + 6px);right:8px;max-width:min(520px,calc(100% - 16px));white-space:pre-wrap;background:var(--bg-elev);color:var(--red);border:1px solid var(--border);border-radius:10px;padding:10px 12px;box-shadow:0 8px 24px #0003}#status[data-error=true]:before{background:var(--red)}#status[data-error=true]{overflow-wrap:anywhere;word-break:break-word}
 #screen{flex:1;min-width:0;min-height:0;overflow:auto;background:#000;position:relative}main:fullscreen{width:100%;height:100%;background:var(--bg)}canvas{display:block;width:100%;height:100%;object-fit:contain;touch-action:none;outline-offset:-3px}#screen.native canvas{width:auto;height:auto;max-width:none}@media(max-width:700px){#toolbar{flex-wrap:wrap;gap:2px}#toolbar-scroll{width:100%}#status{margin-left:4px;min-height:18px}#toolbar button,#toolbar summary,#toolbar label{min-height:34px}}
+#clipboard-transfer-status{position:absolute;bottom:8px;left:8px;max-width:min(38em,calc(100% - 16px));margin:0;padding:6px 10px;border:1px solid var(--border);border-radius:7px;background:var(--bg-elev);color:var(--text);overflow-wrap:anywhere;pointer-events:none;font-size:12px}
 ${manualClipboardCss}${clipboardDialogCss}
 </style></head><body><main>
 <header id="toolbar"><div id="toolbar-scroll"><nav id="controls"><button id="connect" disabled data-i18n="connect"></button><button id="disconnect" disabled data-i18n="disconnect"></button><button id="clipboard" type="button" aria-haspopup="dialog" data-i18n="clipboard"></button><div class="view-options"><label><input id="viewonly" type="checkbox"><span data-i18n="viewonly"></span></label><label><input id="scale" type="checkbox" checked><span data-i18n="scale"></span></label></div><label><span data-i18n="display"></span><select id="display-source" disabled><option value="" data-i18n="primaryDisplay"></option></select></label><button id="fullscreen" data-i18n="fullscreen"></button></nav>
-<details id="settings"><summary data-i18n="setup"></summary><section id="setup" aria-label="Desktop setup"><p id="setup-status" role="status" aria-live="polite"></p><div class="actions"><button id="check" data-i18n="check"></button><button id="enable" disabled data-i18n="enable"></button><button id="disable" disabled data-i18n="disable"></button></div><aside id="mac-permission-guide" hidden aria-label="macOS permissions"><p data-i18n="macGuide"></p></aside><p id="hint" data-i18n="hint"></p></section></details>
+<details id="settings"><summary data-i18n="setup"></summary><section id="setup" aria-label="Desktop setup"><p id="setup-status" role="status" aria-live="polite"></p><div class="actions"><button id="check" data-i18n="check"></button><button id="enable" disabled data-i18n="enable"></button><button id="disable" disabled data-i18n="disable"></button></div><aside id="mac-permission-guide" hidden aria-label="macOS permissions"><p data-i18n="macGuide"></p></aside><label><input id="map-shortcuts" type="checkbox"><span data-i18n="mapShortcuts"></span></label><p id="hint" data-i18n="hint"></p></section></details>
 <details id="quality-panel"><summary data-i18n="quality"></summary><section id="quality-form"><label><span data-i18n="quality"></span><select id="quality-mode"><option value="auto" data-i18n="qualityAuto"></option><option value="smooth" data-i18n="qualitySmooth"></option><option value="balanced" data-i18n="qualityBalanced"></option><option value="sharp" data-i18n="qualitySharp"></option></select></label><label><span data-i18n="resolution"></span><input id="quality-edge" type="hidden" value="0"><select id="quality-resolution"><option value="window" data-i18n="resolutionAuto"></option><option value="native" data-i18n="resolutionNative"></option><option value="4096x2160">4096 × 2160</option><option value="3840x2160">3840 × 2160</option><option value="2880x1800">2880 × 1800</option><option value="2560x1600">2560 × 1600</option><option value="2560x1440">2560 × 1440</option><option value="2048x1536">2048 × 1536</option><option value="1920x1200">1920 × 1200</option><option value="1920x1080">1920 × 1080</option><option value="1680x1050">1680 × 1050</option><option value="1600x900">1600 × 900</option><option value="1440x900">1440 × 900</option><option value="1366x768">1366 × 768</option><option value="1280x1024">1280 × 1024</option><option value="1280x800">1280 × 800</option><option value="1280x720">1280 × 720</option><option value="1024x768">1024 × 768</option><option value="800x600">800 × 600</option><option value="custom" data-i18n="resolutionCustom"></option></select></label><div id="resolution-custom" hidden><label><span data-i18n="resolutionWidth"></span><input id="quality-width" type="number" min="320" max="4096" step="1" value="1920"></label><label><span data-i18n="resolutionHeight"></span><input id="quality-height" type="number" min="320" max="4096" step="1" value="1080"></label></div><p id="resolution-status" role="status"></p><label><span data-i18n="color"></span><select id="quality-color"><option value="limited" data-i18n="colorStandard"></option><option value="full" data-i18n="colorFull"></option><option value="hdr" disabled data-i18n="colorHdr"></option></select></label><p id="color-note"></p><label><span data-i18n="frameRate"></span><select id="quality-fps"><option value="10">10 FPS</option><option value="15">15 FPS</option><option value="30">30 FPS</option><option value="60" selected>60 FPS</option><option value="120">120 FPS</option><option value="240">240 FPS</option></select></label><p id="quality-note" data-i18n="qualityNote"></p></section></details>
 <details id="text-panel"><summary data-i18n="textToggle"></summary><form id="text-form"><label for="text" data-i18n="text"></label><input id="text" type="text" disabled autocomplete="off" maxlength="2048"><button id="send-text" type="submit" disabled data-i18n="send"></button></form></details>
 <button id="diagnostics" aria-pressed="true" aria-controls="statistics" data-i18n="diagnostics"></button></div><p id="status" role="status" aria-live="polite"></p></header>
-<p id="statistics"></p><div id="screen"><canvas id="canvas" width="1" height="1" tabindex="0" aria-describedby="hint"></canvas></div>
+<p id="statistics"></p><div id="screen"><canvas id="canvas" width="1" height="1" tabindex="0" aria-describedby="hint"></canvas><p id="clipboard-transfer-status" role="status" hidden></p></div>
 </main><script type="module">
 const appUrl = path => new URL(path, document.baseURI);
 ${desktopThemeScript()}
@@ -40,7 +42,7 @@ const messages = {
  title:['设备远程桌面','Remote desktop'],connect:['连接','Connect'],disconnect:['断开','Disconnect'],
  check:['检查状态','Check status'],enable:['启用','Enable'],disable:['停用','Disable'],setup:['桌面设置','Desktop setup'],
  display:['显示器','Display'],primaryDisplay:['主屏','Primary display'],viewonly:['只读','View only'],scale:['适应窗口','Fit to window'],fullscreen:['全屏','Fullscreen'],
- clipboard:['剪贴板','Clipboard'],
+ clipboard:['剪贴板','Clipboard'],mapShortcuts:['跨系统快捷键转换（Ctrl ↔ ⌘ / Win）','Translate Windows and Mac shortcuts (Ctrl ↔ ⌘ / Win)'],
  textToggle:['文字输入','Text input'],text:['文字输入（支持中文）','Text input (including Chinese)'],send:['发送','Send'],
  hint:['控制模式：点击画面后使用键盘；触屏可拖动，中文请用顶部文字输入发送。只读模式由服务端强制执行。','Control mode: focus the image to use the keyboard; drag with touch. Use Text input in the toolbar for composed text. View only is enforced by the server.'],
  checking:['正在检查…','Checking…'],saving:['正在保存…','Saving…'],enabled:['已启用','Enabled'],disabled:['已停用','Disabled'],
@@ -83,6 +85,7 @@ let rendered = 0, sampleAt = performance.now(), decodeMs = 0, lastCaptured = 0, 
 let selectedDisplay = '', captureBackend = '';
 let dynamicQuality = false, qualityTimer, lastQuality = '';
 let sourceWidth=0,sourceHeight=0,resolutionLimit=2560,colorSupported=false,actualColorRange='limited',displayConfiguration='';
+const viewportPixels=(${desktopViewportEdge.toString()});
 const resolveDesktopResolution=(${desktopResolution.toString()});
 ${desktopClipboardPageScript()}
 ${desktopFilesPageScript()}
@@ -114,7 +117,7 @@ function updateQuality() {
  qualityTimer = setTimeout(() => {
   if (!valid || !dynamicQuality || !ready || socket?.readyState !== WebSocket.OPEN) return;
   if (!screen.clientWidth || !screen.clientHeight) return;
-  const viewportEdge = Math.max(640, Math.min(resolutionLimit, Math.round(Math.max(screen.clientWidth, screen.clientHeight) * (devicePixelRatio || 1))));
+  const viewportEdge = viewportPixels(screen.clientWidth,screen.clientHeight,devicePixelRatio||1,sourceWidth,sourceHeight,$('quality-mode').value,resolutionLimit);
   const edge=resolveDesktopResolution($('quality-resolution').value,Number($('quality-width').value),Number($('quality-height').value),sourceWidth,sourceHeight,viewportEdge,resolutionLimit);
   if(edge===undefined)return;
   const message = {type:'configure', mode:$('quality-mode').value, maxEdge:$('quality-resolution').value==='window'?0:edge, viewportEdge, fps:Number($('quality-fps').value),...(colorSupported?{colorRange:$('quality-color').value}:{})};
@@ -154,7 +157,10 @@ function send(message) {
  try { socket.send(JSON.stringify(message)); return true; }
  catch { fail(t('connectionError')); return false; }
 }
+const desktopKeys=(()=>{const __name=fn=>fn;return (${desktopKeyboard.toString()})})()((action,code)=>send({type:'key',action,code}));
+const viewerPlatform = navigator.userAgentData?.platform || navigator.platform || '';
 function release() {
+ desktopKeys.clear();
  if (ready && !connectionViewOnly && socket?.readyState === WebSocket.OPEN) {
   try { socket.send(JSON.stringify({type:'release'})); } catch { /* Closing sockets cannot receive a release. */ }
  }
@@ -458,8 +464,9 @@ canvas.addEventListener('wheel', event => {
 }, {passive:false});
 for (const action of ['down','up']) canvas.addEventListener('key' + action, event => {
  if (!canInput() || event.isComposing || !event.code) return;
- event.preventDefault(); send({type:'key', action, code:event.code});
+ event.preventDefault(); desktopKeys.key(action,event,viewerPlatform,config?.os,$('map-shortcuts').checked);
 });
+$('map-shortcuts').addEventListener('change',release);
 canvas.addEventListener('blur', release);
 window.addEventListener('blur', release);
 document.addEventListener('visibilitychange', () => { if (document.hidden) { release(); clearTimeout(retryTimer); } else scheduleRecovery(); });

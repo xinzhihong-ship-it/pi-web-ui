@@ -23,6 +23,7 @@ describe("desktop settings persistence", () => {
 			height: 2160,
 			colorRange: "full",
 			diagnostics: false,
+			mapShortcuts: true,
 		});
 		expect(desktopPreferences(scope).read()).toEqual({
 			clipboard: "both",
@@ -36,6 +37,7 @@ describe("desktop settings persistence", () => {
 			height: 2160,
 			colorRange: "full",
 			diagnostics: false,
+			mapShortcuts: true,
 		});
 		expect(desktopPreferences(JSON.stringify(["https://hub.example", "mac-b"])).read()).toEqual({});
 		desktopPreferences(scope).write({ clipboard: "bogus", fps: -1, scale: "false", token: "must-not-save" });
@@ -48,6 +50,7 @@ describe("desktop settings persistence", () => {
 				height: "1080",
 				colorRange: "hdr",
 				diagnostics: 1,
+				mapShortcuts: "yes",
 			}),
 		).toEqual({});
 	});

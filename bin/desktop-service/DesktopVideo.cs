@@ -8,6 +8,12 @@ using System.Runtime.InteropServices;
 
 // Pixels stay inside the native encoder. The service transports bounded Annex-B chunks only.
 internal static class DesktopVideo {
+    internal static int BitrateKbps(int edge, int quality, int fps) {
+        double baseKbps = Math.Max(1500, 9000 * Math.Pow(edge / 1920.0, 2));
+        double detail = quality <= 70 ? Math.Pow(quality / 70.0, 2) : 1 + (quality - 70) / 25.0;
+        double fpsFactor = Math.Sqrt(Math.Max(15, fps) / 60.0);
+        return (int)Math.Round(Math.Min(50000, Math.Max(600, baseKbps * detail * fpsFactor)), MidpointRounding.AwayFromZero);
+    }
     [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left,Top,Right,Bottom; }
     [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] struct OutputDesc {
         [MarshalAs(UnmanagedType.ByValTStr,SizeConst=32)] public string Name;
@@ -96,7 +102,8 @@ internal static class DesktopVideo {
     static string Args(NativeDesktop.VideoSettings s,Candidate c) {
         var b=s.Bounds; double scale=Math.Min(1,(double)s.Edge/Math.Max(b.Width,b.Height));
         int w=Math.Max(2,(int)(b.Width*scale)/2*2),h=Math.Max(2,(int)(b.Height*scale)/2*2);
-        int bitrate=(int)((s.Edge>=2400?14000000:s.Edge>=1700?9000000:s.Edge>=1200?5000000:2500000)*Math.Max(0.6,Math.Min(1.25,s.Quality/70.0))*(s.Fps>=90?1.4:1));
+        int bitrate=1000*BitrateKbps(Math.Max(w,h),s.Quality,s.Fps);
+        string scaler=s.Quality>=75?"lanczos":"fast_bilinear";
         string args="-hide_banner -loglevel error -nostdin -flags low_delay -filter_threads 2 -filter_complex_threads 2 -probesize 32 -analyzeduration 0 ";
         string filter;
         if(c.Output!=null) {
@@ -105,7 +112,7 @@ internal static class DesktopVideo {
             args+="-init_hw_device d3d11va=capture:"+c.Output.Adapter+" -filter_hw_device capture -filter_complex ddagrab=output_idx="+c.Output.Index+":framerate="+s.Fps+":draw_mouse=1:dup_frames=1:output_fmt=bgra";
             if(c.DirectTexture) filter="";
             else if(c.Codec=="libx264"||c.Readback) {
-                filter="hwdownload,format=bgra,scale="+w+":"+h+":flags=fast_bilinear,format="+(c.Codec=="libx264"?"yuv420p":"nv12,hwupload");
+                filter="hwdownload,format=bgra,scale="+w+":"+h+":flags="+scaler+",format="+(c.Codec=="libx264"?"yuv420p":"nv12,hwupload");
             } else filter="scale_d3d11=width="+w+":height="+h+":format=nv12";
             // D3D11 NVENC sessions require texture input; CPU frames must be uploaded again.
             // This preserves DXGI capture when the driver's GPU video processor is unavailable.
@@ -114,7 +121,7 @@ internal static class DesktopVideo {
             args+=" ";
         } else {
             args+="-r "+s.Fps+" -f gdigrab -framerate "+s.Fps+" -draw_mouse 1 -offset_x "+b.Left+" -offset_y "+b.Top+" -video_size "+b.Width+"x"+b.Height+" -i desktop ";
-            filter="scale="+w+":"+h+":flags=fast_bilinear,format=yuv420p";
+            filter="scale="+w+":"+h+":flags="+scaler+",format=yuv420p";
             args+="-vf "+filter+" ";
         }
         // gdigrab timestamps use microseconds; never let the muxer turn that timebase into a

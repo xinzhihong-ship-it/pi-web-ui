@@ -37,9 +37,6 @@ internal static class DesktopHardware {
         if(module==IntPtr.Zero) throw new IOException("Cannot load embedded hardware codec: "+Marshal.GetLastWin32Error());
         open=Symbol<Open>("pi_codec_open_color"); encode=Symbol<Encode>("pi_codec_encode"); configure=Symbol<Configure>("pi_codec_configure"); close=Symbol<Close>("pi_codec_close");
     }
-    static int Bitrate(NativeDesktop.VideoSettings s) {
-        return (int)((s.Edge>=3500?28000:s.Edge>=2400?14000:s.Edge>=1700?9000:s.Edge>=1200?5000:2500)*Math.Max(0.6,Math.Min(1.25,s.Quality/70.0))*(s.Fps>=90?1.4:1));
-    }
     internal static bool Stream(NativeDesktop.VideoSettings settings) {
         try { return StreamCore(settings,true,false); }
         catch(UserCaptureRequired) {
@@ -57,7 +54,7 @@ internal static class DesktopHardware {
         using(var awake=new DisplayWake()) using(var capture=new TextureCapture(settings.Bounds,String.Equals(settings.Desktop,"Default",StringComparison.OrdinalIgnoreCase),allowUser,wgcOnly)) using(var timer=new FrameTimer()) {
             double scale=Math.Min(1,(double)settings.Edge/Math.Max(settings.Bounds.Width,settings.Bounds.Height));
             int width=Math.Max(2,(int)(settings.Bounds.Width*scale)/2*2),height=Math.Max(2,(int)(settings.Bounds.Height*scale)/2*2);
-            IntPtr encoder=open(capture.Device,width,height,Bitrate(settings),settings.Fps,settings.ColorRange=="full"?1:0);
+            IntPtr encoder=open(capture.Device,width,height,DesktopVideo.BitrateKbps(Math.Max(width,height),settings.Quality,settings.Fps),settings.Fps,settings.ColorRange=="full"?1:0);
             if(encoder==IntPtr.Zero) throw new IOException("Native hardware encoder probe failed");
             bool first=true; Exception failure=null;
             Packet packet=(bytes,size,key,opaque,pts)=>{
@@ -74,7 +71,7 @@ internal static class DesktopHardware {
                     var current=NativeDesktop.ReadVideoSettings();
                     if(current.Desktop!=settings.Desktop||current.Bounds!=settings.Bounds||current.Edge!=settings.Edge||generation!=NativeDesktop.VideoGeneration||current.ColorRange!=settings.ColorRange) return true;
                     if(current.Fps!=settings.Fps||current.Quality!=settings.Quality) {
-                        if(configure(encoder,Bitrate(current),current.Fps)!=0) return true;
+                        if(configure(encoder,DesktopVideo.BitrateKbps(Math.Max(width,height),current.Quality,current.Fps),current.Fps)!=0) return true;
                         settings=current; next=clock.Elapsed.TotalMilliseconds;
                     }
                     if(clock.ElapsedMilliseconds-heartbeat>=500) { NativeDesktop.VideoAlive(); heartbeat=clock.ElapsedMilliseconds; }

@@ -383,9 +383,10 @@ var videoEncoder: VideoEncoder?
 var encoderWidth = 0, encoderHeight = 0, encoderRate = 0
 var encoderFPS = 0.0, lastVideoAlive = 0.0
 func videoBitrate(edge: Double, quality: Double, fps: Double) -> Int {
-    let base: Double = edge >= 3500 ? 28_000_000 : edge >= 2400 ? 14_000_000 : edge >= 1700 ? 9_000_000 : edge >= 1200 ? 5_000_000 : 2_500_000
-    let q = min(1.25, max(0.6, quality / 0.7))
-    return Int(base * q * (fps >= 90 ? 1.4 : 1))
+    let baseKbps = max(1500.0, 9000.0 * pow(edge / 1920.0, 2))
+    let detail = quality <= 0.7 ? pow(quality / 0.7, 2) : 1 + (quality - 0.7) / 0.25
+    let fpsFactor = sqrt(max(15.0, fps) / 60.0)
+    return 1000 * Int(min(50000.0, max(600.0, baseKbps * detail * fpsFactor)).rounded())
 }
 while true {
     lock.lock(); let edge = maxEdge, quality = jpegQuality, fps = captureFPS, requested = requestedDisplay; lock.unlock()

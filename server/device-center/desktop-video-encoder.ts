@@ -110,7 +110,7 @@ export function rawVideoArguments(
 		!parseDesktopProfile(profile)
 	)
 		throw new Error("Invalid encoder profile");
-	const bitrate = videoBitrate(profile);
+	const bitrate = videoBitrate({ ...profile, maxEdge: Math.max(width, height) });
 	return [
 		"-hide_banner",
 		"-loglevel",

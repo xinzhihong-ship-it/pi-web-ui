@@ -1,3 +1,22 @@
+/** Physical pixels occupied by the fitted image, excluding letterboxing. */
+export function desktopViewportEdge(
+	width: number,
+	height: number,
+	dpr: number,
+	sourceWidth: number,
+	sourceHeight: number,
+	mode: string,
+	limit: number,
+) {
+	const nativeEdge = Math.max(sourceWidth, sourceHeight);
+	let pixels = Math.max(width, height) * dpr;
+	if (sourceWidth > 0 && sourceHeight > 0) {
+		pixels = Math.min(1, Math.min(width / sourceWidth, height / sourceHeight) * dpr) * nativeEdge;
+		if ((mode === "auto" || mode === "sharp") && pixels >= nativeEdge * 0.8) pixels = nativeEdge;
+	}
+	return Math.max(640, Math.min(limit, Math.round(pixels)));
+}
+
 /** Pure, shared with the standalone player. The requested box never stretches the desktop. */
 export function desktopResolution(
 	mode: string,
