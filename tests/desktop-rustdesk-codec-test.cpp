@@ -12,6 +12,7 @@ typedef void (*Packet)(const uint8_t*,int32_t,int32_t,const void*,int64_t);
 typedef void* (*Open)(void*,int,int,int,int);
 typedef void* (*OpenColor)(void*,int,int,int,int,int);
 typedef int (*Encode)(void*,void*,Packet,void*,int64_t);
+typedef int (*Repeat)(void*,Packet,void*,int64_t);
 typedef int (*Configure)(void*,int,int);
 typedef void (*Close)(void*);
 int frames=0; long long bytes=0;
@@ -29,7 +30,8 @@ int main(int argc,char** argv) {
   auto open=(Open)GetProcAddress(dll,"pi_codec_open"); auto encode=(Encode)GetProcAddress(dll,"pi_codec_encode");
   auto configure=(Configure)GetProcAddress(dll,"pi_codec_configure"); auto close=(Close)GetProcAddress(dll,"pi_codec_close");
   auto openColor=(OpenColor)GetProcAddress(dll,"pi_codec_open_color");
-  if(!open||!openColor||!encode||!configure||!close) return 4;
+  auto repeat=(Repeat)GetProcAddress(dll,"pi_codec_repeat");
+  if(!open||!openColor||!encode||!repeat||!configure||!close) return 4;
   const int fullRange=atoi(argv[2]);
   ComPtr<ID3D11Device> device; ComPtr<ID3D11DeviceContext> context;
   D3D_FEATURE_LEVEL feature;
@@ -49,7 +51,8 @@ int main(int argc,char** argv) {
       else if(configured!=0) { close(encoder); return 10; }
     }
     if(i==60) { close(encoder); encoder=openColor(device.Get(),3840,2160,50000,60,fullRange); if(!encoder) return 15; }
-    if(encode(encoder,texture.Get(),output,nullptr,i*10)!=0) { close(encoder); fprintf(stderr,"encode_failed=%d\n",i); return 9; }
+    int status=i==19 ? repeat(encoder,output,nullptr,i*10) : encode(encoder,texture.Get(),output,nullptr,i*10);
+    if(status!=0) { close(encoder); fprintf(stderr,"encode_failed=%d\n",i); return 9; }
     if(frames!=i+1) { close(encoder); return 14; }
   }
   close(encoder);

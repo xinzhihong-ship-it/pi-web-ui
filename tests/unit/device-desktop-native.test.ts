@@ -356,8 +356,15 @@ describe("native desktop lifecycle and framed capture", () => {
 		expect(opts.onVideo).toHaveBeenCalledTimes(1);
 		expect(opts.onVideoAlive).toHaveBeenCalledTimes(30);
 		expect(opts.onError).not.toHaveBeenCalled();
+		capture.videoFeedback?.(true);
+		capture.videoFeedback?.(false);
+		capture.requestKeyframe?.();
 		capture.input({ type: "text", text: "view only" });
-		expect(writes).toEqual([]);
+		expect(writes.map((line) => JSON.parse(line))).toEqual([
+			{ type: "video_flow", paused: true },
+			{ type: "video_flow", paused: false },
+			{ type: "video_keyframe" },
+		]);
 		capture.close();
 		child.emit("close", 0);
 	});

@@ -200,3 +200,38 @@ it("times out lack of valid ACK progress, not old frames while the receiver is s
 	flow.reset();
 	expect(flow.progressAt).toBeUndefined();
 });
+
+it("paces variable-size H.264 before capture and fills a fast long-RTT link", () => {
+	function measure(mbps: number, rtt: number) {
+		const flow = new DesktopVideoFlow({ videoBudgetMs: 45 });
+		const pending: { id: number; sent: number; ack: number }[] = [],
+			ages: number[] = [];
+		let wire = 0,
+			next = 0,
+			seq = 0;
+		for (let now = 0; now < 20000; now++) {
+			while (pending[0]?.ack <= now) {
+				const p = pending.shift()!;
+				flow.ack(p.id, 0, now);
+				if (now >= 2000) ages.push(now - p.sent - rtt / 2);
+			}
+			if (now < next) continue;
+			next += 1000 / 60;
+			if (flow.blocked(60)) continue;
+			const key = seq % 60 === 0;
+			const bytes = key ? 95000 : [7000, 34000, 14000, 33000, 12000][seq % 5];
+			seq++;
+			const id = flow.frame(now, bytes, key);
+			wire = Math.max(wire, now) + (bytes * 8) / (1000 * mbps);
+			pending.push({ id, sent: now, ack: wire + rtt + 2 });
+		}
+		ages.sort((a, b) => a - b);
+		return { fps: ages.length / 18, p95: ages[Math.floor(ages.length * 0.95)] };
+	}
+	const slow = measure(4, 100),
+		fast = measure(100, 140);
+	expect(slow.p95).toBeLessThan(275);
+	expect(slow.fps).toBeGreaterThan(19);
+	expect(fast.p95).toBeLessThan(100);
+	expect(fast.fps).toBeGreaterThan(59);
+});

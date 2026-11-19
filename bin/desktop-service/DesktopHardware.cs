@@ -13,9 +13,10 @@ internal static class DesktopHardware {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr Open(IntPtr device,int width,int height,int kbps,int fps,int fullRange);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void Packet(IntPtr bytes,int size,int key,IntPtr opaque,long pts);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int Encode(IntPtr encoder,IntPtr texture,Packet callback,IntPtr opaque,long pts);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int Repeat(IntPtr encoder,Packet callback,IntPtr opaque,long pts);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int Configure(IntPtr encoder,int kbps,int fps);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void Close(IntPtr encoder);
-    static IntPtr module; static Open open; static Encode encode; static Configure configure; static Close close;
+    static IntPtr module; static Open open; static Encode encode; static Repeat repeat; static Configure configure; static Close close;
     static T Symbol<T>(string name) where T:class {
         IntPtr p=GetProcAddress(module,name); if(p==IntPtr.Zero) throw new IOException("Missing desktop codec entry point");
         return Marshal.GetDelegateForFunctionPointer(p,typeof(T)) as T;
@@ -36,6 +37,8 @@ internal static class DesktopHardware {
         module=LoadLibraryEx(path,IntPtr.Zero,0x00000900); // DLL directory + System32 only
         if(module==IntPtr.Zero) throw new IOException("Cannot load embedded hardware codec: "+Marshal.GetLastWin32Error());
         open=Symbol<Open>("pi_codec_open_color"); encode=Symbol<Encode>("pi_codec_encode"); configure=Symbol<Configure>("pi_codec_configure"); close=Symbol<Close>("pi_codec_close");
+        IntPtr p=GetProcAddress(module,"pi_codec_repeat");
+        if(p!=IntPtr.Zero) repeat=(Repeat)Marshal.GetDelegateForFunctionPointer(p,typeof(Repeat));
     }
     internal static bool Stream(NativeDesktop.VideoSettings settings) {
         try { return StreamCore(settings,true,false); }
@@ -66,21 +69,27 @@ internal static class DesktopHardware {
             };
             try {
                 NativeDesktop.VideoBackend(capture.Backend,capture.Codec,"native-d3d11",settings.ColorRange);
-                var clock=Stopwatch.StartNew(); double next=0; long heartbeat=0,waitingSince=0; int generation=NativeDesktop.VideoGeneration;
+                var clock=Stopwatch.StartNew(); double next=0,detailAt=0; long heartbeat=0,waitingSince=0; int generation=NativeDesktop.VideoGeneration,detailLeft=0;
                 while(!NativeDesktop.VideoStopped) {
                     var current=NativeDesktop.ReadVideoSettings();
-                    if(current.Desktop!=settings.Desktop||current.Bounds!=settings.Bounds||current.Edge!=settings.Edge||generation!=NativeDesktop.VideoGeneration||current.ColorRange!=settings.ColorRange) return true;
+                    if(current.Desktop!=settings.Desktop||current.DisplayId!=settings.DisplayId||current.Bounds!=settings.Bounds||current.Edge!=settings.Edge||generation!=NativeDesktop.VideoGeneration||current.ColorRange!=settings.ColorRange) return true;
                     if(current.Fps!=settings.Fps||current.Quality!=settings.Quality) {
                         if(configure(encoder,DesktopVideo.BitrateKbps(Math.Max(width,height),current.Quality,current.Fps),current.Fps)!=0) return true;
                         settings=current; next=clock.Elapsed.TotalMilliseconds;
                     }
                     if(clock.ElapsedMilliseconds-heartbeat>=500) { NativeDesktop.VideoAlive(); heartbeat=clock.ElapsedMilliseconds; }
-                    if(NativeDesktop.VideoPaused) { timer.Wait(4); next=clock.Elapsed.TotalMilliseconds; continue; }
+                    if(NativeDesktop.VideoPaused) { timer.Wait(4); next=clock.Elapsed.TotalMilliseconds; detailAt=next+200; continue; }
                     double now=clock.Elapsed.TotalMilliseconds;
                     if(now<next) { timer.Wait(next-now); continue; }
                     bool updated=capture.Read(texture=>{
                         if(encode(encoder,texture,packet,IntPtr.Zero,clock.ElapsedMilliseconds)!=0) throw new IOException("Native hardware encoder failed");
                     });
+                    if(updated) { detailLeft=repeat!=null&&settings.Quality>=65?8:0; detailAt=clock.Elapsed.TotalMilliseconds+200; }
+                    else if(detailLeft>0&&settings.Quality>=65&&now>=detailAt) {
+                        if(repeat(encoder,packet,IntPtr.Zero,clock.ElapsedMilliseconds)!=0) detailLeft=0;
+                        else detailLeft--;
+                        detailAt=clock.Elapsed.TotalMilliseconds+Math.Max(125,1000.0/settings.Fps);
+                    }
                     if(failure!=null) throw failure;
                     // Keep the cadence on a fixed timeline. Starting a fresh interval
                     // after every late surface accumulates polling/scheduler jitter.

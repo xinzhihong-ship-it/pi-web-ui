@@ -296,16 +296,17 @@ function startVideo(codec, reset = false, framed = false) {
  state.ready = configure(true);
  return true;
 }
-function decodeVideo(blob) {
+function decodeVideo(data) {
  const state = videoState; if (!state) return;
  const sequence = ++state.sequence;
- if (state.pending >= 32 || state.bytes + blob.size > 16 * 1024 * 1024) { state.discardBefore = sequence; state.recover(); return; }
- state.pending++; state.bytes += blob.size;
+ const size = data.byteLength ?? data.size;
+ if (state.pending >= 32 || state.bytes + size > 16 * 1024 * 1024) { state.discardBefore = sequence; state.recover(); return; }
+ state.pending++; state.bytes += size;
  state.queue = state.queue.then(async () => {
   if (!await state.ready || videoState !== state || sequence < state.discardBefore) return;
   const decoder = videoDecoder;
   if (!decoder || decoder.state !== 'configured') return;
-  let bytes = new Uint8Array(await blob.arrayBuffer());
+  let bytes = new Uint8Array(data.byteLength === undefined ? await data.arrayBuffer() : data);
   if (decoder !== videoDecoder || videoState !== state || sequence < state.discardBefore) return;
   let key = false, id = 0, timestamp = Math.round(performance.now()*1000);
   if (state.framed) {
@@ -315,14 +316,14 @@ function decodeVideo(blob) {
    if(!id || !Number.isFinite(pts) || pts<0 || pts>Number.MAX_SAFE_INTEGER/1000) throw new Error('Invalid video timestamp');
    timestamp = Math.round(pts*1000); bytes = bytes.subarray(20);
   }
-  for (let i=0;i+4<bytes.length;i++) if (bytes[i]===0&&bytes[i+1]===0&&bytes[i+2]===1&&(bytes[i+3]&0x1f)===5) { key = true; break; }
+  if (!state.framed) for (let i=0;i+4<bytes.length;i++) if (bytes[i]===0&&bytes[i+1]===0&&bytes[i+2]===1&&(bytes[i+3]&0x1f)===5) { key = true; break; }
   if (state.waitingKey && !key) { state.recover(); return; }
   if (decoder.decodeQueueSize > 8 || state.frames.size >= 96) { state.recover(); return; }
   videoTime = Math.max(videoTime+1,timestamp);
   if (id) state.frames.set(videoTime,{id,at:performance.now()});
   try { decoder.decode(new EncodedVideoChunk({type:key?'key':'delta', timestamp:videoTime, data:bytes})); state.waitingKey = false; videoDecodeAt = performance.now(); }
   catch { state.recover(); }
- }).catch(() => { if (videoState === state) fail(t('decodeError')); }).finally(() => { state.pending--; state.bytes -= blob.size; });
+ }).catch(() => { if (videoState === state) fail(t('decodeError')); }).finally(() => { state.pending--; state.bytes -= size; });
 }
 function updateStatistics(message) {
  if (!['captured','sent','replaced','ackMs','queued'].every(key => typeof message[key] === 'number' && Number.isFinite(message[key]))) return;
@@ -337,7 +338,7 @@ function updateStatistics(message) {
   captureFps:((message.captured-lastCaptured)*1000/Math.max(1,sourceElapsed)).toFixed(1),
   sendFps:((message.sent-lastSent)*1000/Math.max(1,sourceElapsed)).toFixed(1)};
  resolutionStatus();
- $('statistics').textContent = t('stats').replace(/\\{(\\w+)\\}/g, (_,key) => String(values[key])) + ' · ' + canvas.width + ' × ' + canvas.height + (colorSupported?' · '+t(actualColorRange==='full'?'colorFull':'colorStandard'):'') + (videoMode ? ((captureBackend.includes('Native D3D11')||captureBackend.includes('RustDesk hwcodec')) ? (zh ? ' · 按画面变化发送' : ' · Desktop updates only') : (zh ? ' · 视频帧数含重复画面' : ' · Video counts include duplicate frames')) : '');
+ $('statistics').textContent = t('stats').replace(/\\{(\\w+)\\}/g, (_,key) => String(values[key])) + ' · ' + canvas.width + ' × ' + canvas.height + (colorSupported?' · '+t(actualColorRange==='full'?'colorFull':'colorStandard'):'') + (videoMode ? ((captureBackend.includes('Native D3D11')||captureBackend.includes('RustDesk hwcodec')||captureBackend.startsWith('screencapturekit')) ? (zh ? ' · 画面变化和短时静态细化' : ' · Desktop changes and short static refresh') : (zh ? ' · 视频帧数含重复画面' : ' · Video counts include duplicate frames')) : '');
  rendered = 0; sampleAt = now; lastCaptured = message.captured; lastSent = message.sent;
  lastStatsElapsed = sourceClock ? message.elapsedMs : 0;
 }
@@ -364,13 +365,14 @@ function connect() {
    try {
     const message = JSON.parse(event.data);
     if (message.type === 'error') fail(desktopError(message.message), typeof message.message === 'string' && desktopIssue(message.message, zh)?.retry === true);
-    else if (message.type === 'video') { if (!startVideo(message.codec, message.reset === true, message.framed === 1)) fail(t('decodeError')); }
+    else if (message.type === 'video') { if (startVideo(message.codec, message.reset === true, message.framed === 1)) current.binaryType = 'arraybuffer'; else fail(t('decodeError')); }
     else if (message.type === 'ready') { ready = true; jpegFeedback = message.jpegFeedback === 1; dynamicQuality = message.dynamicQuality === true; controls(); updateQuality(); clipboardAvailable(); }
     else if (message.type === 'displays') updateDisplays(message);
     else if (message.type === 'stats') updateStatistics(message);
    } catch { fail(t('connectionError')); }
+  } else if (videoMode && (typeof event.data?.byteLength === 'number' || typeof event.data?.arrayBuffer === 'function')) {
+   void decodeVideo(event.data);
   } else if (event.data instanceof Blob) {
-   if (videoMode) { void decodeVideo(event.data); return; }
    const id = ++jpegSequence;
    pendingFrame = {blob:event.data, generation:currentGeneration, socket:current, ack:jpegFeedback ? {type:'jpeg_ack',id} : {type:'ack'}}; void decodeFrames();
   }

@@ -107,9 +107,10 @@ final class VideoEncoder {
         }
         return out.isEmpty ? nil : (out, keyframe)
     }
-    func encode(_ pixels: CVPixelBuffer) {
+    func encode(_ pixels: CVPixelBuffer, forceKey: Bool = false) {
         var flags = VTEncodeInfoFlags()
-        VTCompressionSessionEncodeFrame(session, imageBuffer: pixels, presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()), duration: .invalid, frameProperties: nil, infoFlagsOut: &flags) { [weak self] status, _, sample in
+        let properties = forceKey ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary : nil
+        VTCompressionSessionEncodeFrame(session, imageBuffer: pixels, presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()), duration: .invalid, frameProperties: properties, infoFlagsOut: &flags) { [weak self] status, _, sample in
             guard status == noErr, let self, let sample, let (data, key) = self.annexB(sample) else { return }
             var payload = Data([0x02, key ? (self.firstKey ? 3 : 1) : 0])
             if key { self.firstKey = false }
@@ -139,7 +140,7 @@ if mode == "video-selftest" {
             }
         }
         CVPixelBufferUnlockBaseAddress(pixels, [])
-        encoder.encode(pixels)
+        encoder.encode(pixels, forceKey: frame == 15)
         usleep(33_000)
     }
     sleep(1)
@@ -242,6 +243,7 @@ func release() {
     buttons.removeAll()
     acknowledged.signal()
 }
+let frames = DesktopFrames()
 // stdin EOF is also a disconnect: release even if no explicit close was delivered.
 DispatchQueue.global().async {
     defer { release(); exit(0) }
@@ -250,6 +252,8 @@ DispatchQueue.global().async {
         guard let data = line.data(using: .utf8), let e = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let type = e["type"] as? String else { continue }
         if type == "close" { return }
         if type == "ack" { acknowledged.signal(); continue }
+        if videoMode && type == "video_flow", let paused = e["paused"] as? Bool { frames.setPaused(paused); continue }
+        if videoMode && type == "video_keyframe" { frames.requestKeyframe(); continue }
         if type == "display" {
             if let id = e["id"] as? String, let display = UInt32(id) { lock.lock(); requestedDisplay = display; lock.unlock() }
             continue
@@ -311,15 +315,33 @@ final class DesktopFrames: NSObject, SCStreamOutput, SCStreamDelegate {
     let condition = NSCondition()
     var latest: CVPixelBuffer?
     var failure: String?
+    private var lastVideo: CVPixelBuffer?
+    private var paused = false, forceKey = false
+    private var remaining = 0, nextDetail = 0.0
+    func setPaused(_ value: Bool) {
+        condition.lock(); defer { condition.unlock() }
+        if !value && paused { nextDetail = max(nextDetail, ProcessInfo.processInfo.systemUptime + 0.2) }
+        paused = value
+        condition.signal()
+    }
+    func requestKeyframe() {
+        condition.lock(); defer { condition.unlock() }
+        forceKey = true; condition.signal()
+    }
+    func clearSource() {
+        condition.lock(); defer { condition.unlock() }
+        latest = nil; lastVideo = nil; remaining = 0; forceKey = true; condition.signal()
+    }
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         condition.lock(); failure = String(describing: error); condition.broadcast(); condition.unlock()
     }
     func stream(_ stream: SCStream, didOutputSampleBuffer sample: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .screen, sample.isValid,
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
-              let status = attachments.first?[.status] as? Int, status == SCFrameStatus.complete.rawValue,
-              let pixels = CMSampleBufferGetImageBuffer(sample) else { return }
-        condition.lock(); latest = pixels; condition.signal(); condition.unlock()
+              let status = attachments.first?[.status] as? Int else { return }
+        if status == SCFrameStatus.blank.rawValue || status == SCFrameStatus.suspended.rawValue || status == SCFrameStatus.stopped.rawValue { clearSource(); return }
+        guard status == SCFrameStatus.complete.rawValue, let pixels = CMSampleBufferGetImageBuffer(sample) else { return }
+        condition.lock(); latest = pixels; if !paused { condition.signal() }; condition.unlock()
     }
     func take() -> CVPixelBuffer? {
         condition.lock(); defer { condition.unlock() }
@@ -327,8 +349,31 @@ final class DesktopFrames: NSObject, SCStreamOutput, SCStreamDelegate {
         if let message = failure { fail("ScreenCaptureKit stream stopped: " + message) }
         let pixels = latest; latest = nil; return pixels
     }
+    func takeVideo(quality: Double, fps: Double) -> (CVPixelBuffer, Bool)? {
+        condition.lock(); defer { condition.unlock() }
+        let deadline = ProcessInfo.processInfo.systemUptime + 1
+        while true {
+            if let message = failure { fail("ScreenCaptureKit stream stopped: " + message) }
+            let now = ProcessInfo.processInfo.systemUptime
+            if !paused {
+                if let pixels = latest {
+                    latest = nil; lastVideo = pixels
+                    remaining = quality >= 0.65 ? 8 : 0; nextDetail = now + 0.2
+                    let key = forceKey; forceKey = false
+                    return (pixels, key)
+                }
+                if let pixels = lastVideo, forceKey { forceKey = false; return (pixels, true) }
+                if let pixels = lastVideo, remaining > 0 && quality >= 0.65 && now >= nextDetail {
+                    remaining -= 1; nextDetail = now + max(0.125, 1 / fps)
+                    return (pixels, false)
+                }
+            }
+            if now >= deadline { return nil }
+            let wake = !paused && remaining > 0 && quality >= 0.65 ? min(deadline, nextDetail) : deadline
+            _ = condition.wait(until: Date(timeIntervalSinceNow: max(0, wake - now)))
+        }
+    }
 }
-let frames = DesktopFrames()
 let captureQueue = DispatchQueue(label: "pi.desktop.capture", qos: .userInteractive)
 let imageContext = CIContext(options: [.cacheIntermediates: false])
 var stream: SCStream?
@@ -341,7 +386,7 @@ func configureStream(edge: Double, fps: Double, displayID: CGDirectDisplayID) {
         do {
             if currentDisplay?.displayID != displayID {
                 if let old = stream { try await old.stopCapture(); stream = nil }
-                captureQueue.sync { frames.condition.lock(); frames.latest = nil; frames.condition.unlock() }
+                captureQueue.sync { frames.clearSource() }
                 currentDisplay = nil
             }
             if stream == nil {
@@ -403,7 +448,7 @@ while true {
         reportedAt = now
     }
     if videoMode {
-        if let pixels = frames.take() {
+        if let (pixels, forceKey) = frames.takeVideo(quality: quality, fps: fps) {
             let w = CVPixelBufferGetWidth(pixels), h = CVPixelBufferGetHeight(pixels)
             let bitrate = videoBitrate(edge: Double(max(w, h)), quality: quality, fps: fps)
             if videoEncoder == nil || encoderWidth != w || encoderHeight != h || encoderFPS != fps {
@@ -412,7 +457,7 @@ while true {
                 encoderWidth = w; encoderHeight = h; encoderFPS = fps
             } else if bitrate != encoderRate { videoEncoder?.setBitrate(bitrate) }
             encoderRate = bitrate
-            videoEncoder?.encode(pixels)
+            videoEncoder?.encode(pixels, forceKey: forceKey)
         } else if now - lastVideoAlive >= 2 {
             writePacket(Data([5]))
             lastVideoAlive = now

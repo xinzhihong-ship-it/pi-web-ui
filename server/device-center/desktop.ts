@@ -393,7 +393,7 @@ export function createDeviceDesktop({
 		let ackMs = 0;
 		let hasDisplayAck = false;
 		const quality = new DesktopQuality();
-		const videoFlow = new DesktopVideoFlow();
+		const videoFlow = new DesktopVideoFlow({ videoBudgetMs: 45 });
 		const jpegFlow = new DesktopVideoFlow({ deliveryBudgetMs: 100 });
 		let automatic = true,
 			flowPaused = false,
@@ -437,7 +437,12 @@ export function createDeviceDesktop({
 			}
 			if (frame.data.length > DESKTOP_LIMITS.frame) return fail("Desktop frame exceeds the capture size limit.");
 			captured++;
-			if (ws.bufferedAmount + frame.data.length > DESKTOP_LIMITS.queue || (videoFeedback && videoFlow.count >= 96)) {
+			if (
+				ws.bufferedAmount + frame.data.length > DESKTOP_LIMITS.queue ||
+				(videoFeedback &&
+					(videoFlow.count >= 96 ||
+						(videoFlow.count > 0 && videoFlow.bytes + frame.data.length + 20 > DESKTOP_LIMITS.queue)))
+			) {
 				videoDropping = true;
 				replaced++;
 				return;
@@ -461,7 +466,7 @@ export function createDeviceDesktop({
 			if (videoFeedback) {
 				const header = Buffer.allocUnsafe(20);
 				header.write("PIV1", 0, "ascii");
-				header.writeUInt32BE(videoFlow.frame(performance.now()), 4);
+				header.writeUInt32BE(videoFlow.frame(performance.now(), frame.data.length + 20, frame.key), 4);
 				header.writeDoubleBE(frame.timestampMs ?? performance.now() - statsStartedAt, 8);
 				header.writeUInt32BE(frame.key ? 1 : 0, 16);
 				data = Buffer.concat([header, frame.data]);
@@ -604,6 +609,7 @@ export function createDeviceDesktop({
 					ackMs: videoDeclared ? Math.round(videoFlow.ackMs) : ackMs,
 					videoQueueMs: videoFlow.queueMs,
 					videoInFlight: videoFlow.count,
+					videoInFlightBytes: videoFlow.bytes,
 					jpegInFlight: jpegFlow.count,
 					jpegInFlightBytes: inFlightBytes,
 					queued: Math.max(queued, ws.bufferedAmount),
@@ -662,6 +668,15 @@ export function createDeviceDesktop({
 						if (flowPaused) armVideoStall();
 						applyProfile(videoFlow.profile(quality.profile, automatic));
 						paceVideo();
+						if (
+							videoDropping &&
+							!flowPaused &&
+							ws.bufferedAmount < DESKTOP_LIMITS.queue / 2 &&
+							performance.now() - recoveryAt >= 1000
+						) {
+							recoveryAt = performance.now();
+							capture?.requestKeyframe?.();
+						}
 					}
 					return;
 				}

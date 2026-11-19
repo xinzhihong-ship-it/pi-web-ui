@@ -357,18 +357,20 @@ function peerParent(
 		dc.onerror = () => stream.close();
 		dc.onmessage = (event: any) => {
 			try {
-				const data = new Uint8Array(event.data),
-					next = new Uint8Array(buffer.length + data.length);
-				next.set(buffer);
-				next.set(data, buffer.length);
-				buffer = next;
+				const data = new Uint8Array(event.data);
+				if (buffer.length) {
+					const next = new Uint8Array(buffer.length + data.length);
+					next.set(buffer);
+					next.set(data, buffer.length);
+					buffer = next;
+				} else buffer = data;
 				while (buffer.length >= 5) {
 					const length = new DataView(buffer.buffer, buffer.byteOffset).getUint32(1);
 					if (length > 65536) throw new Error("Invalid P2P frame");
 					if (buffer.length < length + 5) break;
 					const type = buffer[0],
 						payload = buffer.slice(5, length + 5);
-					buffer = buffer.slice(length + 5);
+					buffer = buffer.subarray(length + 5);
 					record(type, payload);
 				}
 			} catch {
@@ -497,11 +499,13 @@ function peerParent(
 					if (bytes > 16 * 1024 * 1024) throw new Error("P2P message too large");
 					parts.push(data);
 				} else if (type === 4) {
-					const message = new Uint8Array(bytes);
-					let offset = 0;
-					for (const part of parts) {
-						message.set(part, offset);
-						offset += part.length;
+					const message = parts.length === 1 ? parts[0] : new Uint8Array(bytes);
+					if (parts.length > 1) {
+						let offset = 0;
+						for (const part of parts) {
+							message.set(part, offset);
+							offset += part.length;
+						}
 					}
 					parts = [];
 					bytes = 0;
@@ -564,7 +568,8 @@ function peerParent(
 				return;
 			}
 			ws.onopen = () => port.postMessage({ type: "open" });
-			ws.onmessage = (e: any) => port.postMessage({ type: "message", data: e.data });
+			ws.onmessage = (e: any) =>
+				port.postMessage({ type: "message", data: e.data }, e.data instanceof ArrayBuffer ? [e.data] : []);
 			ws.onclose = (e: any) => {
 				port.postMessage({ type: "close", code: e.code });
 				port.close();

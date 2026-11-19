@@ -89,7 +89,7 @@ struct Session {
             option("preset", "p1"); option("tune", "ull"); option("rc", "cbr");
             option("zerolatency", "1"); option("delay", "0"); option("rc-lookahead", "0");
         } else if (desc.VendorId == 0x1002) {
-            option("usage", "ultralowlatency"); option("quality", "speed"); option("rc", "cbr");
+            option("usage", "ultralowlatency"); option("quality", fps <= 60 ? "balanced" : "speed"); option("rc", "cbr");
             option("filler_data", "0"); option("preanalysis", "0");
         } else { option("preset", "veryfast"); option("async_depth", "1"); option("look_ahead", "0"); }
         check(avcodec_open2(codec, encoder, nullptr), "Hardware encoder initialization");
@@ -187,10 +187,14 @@ float4 ps(Vertex v) : SV_Target {
         D3D11_TEXTURE2D_DESC source = {}; texture->GetDesc(&source);
         if (source.Format != DXGI_FORMAT_B8G8R8A8_UNORM || source.SampleDesc.Count != 1 || source.Width > 16384 || source.Height > 16384) throw std::runtime_error("Unsupported capture surface");
         prepareInput(source);
+        context->CopySubresourceRegion(input.Get(), 0, 0, 0, 0, texture, 0, nullptr);
+        encodeCached(callback, opaque, pts);
+    }
+    void encodeCached(Encoded callback, void* opaque, int64_t pts) {
+        if (!input) throw std::runtime_error("No cached desktop surface");
         Frame frame(av_frame_alloc()); if (!frame) throw std::bad_alloc();
         check(av_hwframe_get_buffer(frames, frame.get(), 0), "GPU frame allocation");
         auto output = (ID3D11Texture2D*)frame->data[0];
-        context->CopySubresourceRegion(input.Get(), 0, 0, 0, 0, texture, 0, nullptr);
         convert(output, UINT(uintptr_t(frame->data[1])));
         context->Flush(); frame->pts = pts;
         frame->color_range = codec->color_range; frame->colorspace = codec->colorspace;
@@ -229,6 +233,10 @@ API void* pi_codec_open(void* device, int width, int height, int kbps, int fps) 
 }
 API int pi_codec_encode(void* handle, void* texture, Encoded callback, void* opaque, int64_t pts) noexcept {
     try { if (!handle || !texture || !callback || pts < 0) return -1; ((Session*)handle)->encode((ID3D11Texture2D*)texture, callback, opaque, pts); return 0; }
+    catch (const std::exception& e) { fprintf(stderr, "[native-codec] %s\n", e.what()); return -1; } catch (...) { return -1; }
+}
+API int pi_codec_repeat(void* handle, Encoded callback, void* opaque, int64_t pts) noexcept {
+    try { if (!handle || !callback || pts < 0) return -1; ((Session*)handle)->encodeCached(callback, opaque, pts); return 0; }
     catch (const std::exception& e) { fprintf(stderr, "[native-codec] %s\n", e.what()); return -1; } catch (...) { return -1; }
 }
 API int pi_codec_configure(void* handle, int kbps, int fps) noexcept {

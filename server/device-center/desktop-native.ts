@@ -535,7 +535,8 @@ function startNativeDesktopOnce(
 		}
 	}
 	const handle: NativeDesktopHandle = {
-		...(service && options.video && windowsDesktopServiceProfiles(service, "video-flow-v1")
+		...(options.video &&
+		(process.platform === "darwin" || (service && windowsDesktopServiceProfiles(service, "video-flow-v1")))
 			? {
 					videoFeedback(paused: boolean) {
 						if (!closing) write({ type: "video_flow", paused });

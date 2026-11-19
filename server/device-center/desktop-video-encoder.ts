@@ -156,6 +156,7 @@ export function startEncodedServiceDesktop(
 	options: NativeDesktopOptions & { profile: DesktopProfile; onVideo(frame: VideoFrame): void },
 ): NativeDesktopHandle {
 	let closed = false,
+		paused = false,
 		generation = 0,
 		profile = options.profile,
 		applied = "",
@@ -237,7 +238,7 @@ export function startEncodedServiceDesktop(
 			onError: fail,
 			onRawFrame(frame, ack) {
 				if (closed) return;
-				if (recovering || !selected) {
+				if (paused || recovering || !selected) {
 					ack();
 					return;
 				}
@@ -299,6 +300,9 @@ export function startEncodedServiceDesktop(
 		source.configure?.(profile);
 	})().catch(() => fail("Could not initialize the built-in desktop video encoder."));
 	return {
+		videoFeedback(value) {
+			paused = value;
+		},
 		input: (event) => {
 			if (!closed) source?.input(event);
 		},
