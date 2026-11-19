@@ -19,7 +19,16 @@ guard #available(macOS 14.0, *) else { fail("Native capture requires macOS 14 or
 let mode = CommandLine.arguments.last ?? "view"
 let readOnly = mode != "control" && mode != "video"
 let preview = mode == "preview"
-let videoMode = mode == "video"
+let videoMode = mode == "video" || mode == "video-view"
+
+// Encoder callbacks and the capture loop share a length-prefixed stdout pipe.
+let packetLock = NSLock()
+func writePacket(_ payload: Data) {
+    packetLock.lock(); defer { packetLock.unlock() }
+    var length = UInt32(payload.count).bigEndian
+    FileHandle.standardOutput.write(Data(bytes: &length, count: 4))
+    FileHandle.standardOutput.write(payload)
+}
 
 // H.264 硬编码（VideoToolbox）：供浏览器 WebCodecs 解码，码率仅为 JPEG 的十分之一。
 // 输出帧格式：[4 字节大端长度][0x02][标志位: 1=关键帧][Annex-B 数据]
@@ -27,6 +36,7 @@ final class VideoEncoder {
     private let session: VTCompressionSession
     private var sps: Data?
     private var pps: Data?
+    private var firstKey = true
     init(width: Int, height: Int, fps: Double, bitrate: Int) {
         var created: VTCompressionSession?
         let status = VTCompressionSessionCreate(
@@ -46,9 +56,16 @@ final class VideoEncoder {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_Baseline_AutoLevel)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: NSNumber(value: Int(fps)))
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: NSNumber(value: fps))
+        setBitrate(bitrate)
+        VTCompressionSessionPrepareToEncodeFrames(session)
+    }
+    func setBitrate(_ bitrate: Int) {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: bitrate))
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: [NSNumber(value: bitrate / 4), NSNumber(value: 1)] as CFArray)
-        VTCompressionSessionPrepareToEncodeFrames(session)
+    }
+    func finish() {
+        VTCompressionSessionCompleteFrames(session, untilPresentationTimeStamp: .invalid)
+        VTCompressionSessionInvalidate(session)
     }
     private func parameterSets(_ sample: CMSampleBuffer) {
         guard let format = CMSampleBufferGetFormatDescription(sample) else { return }
@@ -94,11 +111,10 @@ final class VideoEncoder {
         var flags = VTEncodeInfoFlags()
         VTCompressionSessionEncodeFrame(session, imageBuffer: pixels, presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()), duration: .invalid, frameProperties: nil, infoFlagsOut: &flags) { [weak self] status, _, sample in
             guard status == noErr, let self, let sample, let (data, key) = self.annexB(sample) else { return }
-            var payload = Data([0x02, key ? 1 : 0])
+            var payload = Data([0x02, key ? (self.firstKey ? 3 : 1) : 0])
+            if key { self.firstKey = false }
             payload.append(data)
-            var size = UInt32(payload.count).bigEndian
-            FileHandle.standardOutput.write(Data(bytes: &size, count: 4))
-            FileHandle.standardOutput.write(payload)
+            writePacket(payload)
         }
     }
 }
@@ -138,6 +154,10 @@ func displayIds() -> [CGDirectDisplayID] {
     var ids = [CGDirectDisplayID](repeating: 0, count: 32), count: UInt32 = 0
     guard CGGetActiveDisplayList(32, &ids, &count) == .success else { return [CGMainDisplayID()] }
     return Array(ids.prefix(Int(count)))
+}
+func pixelSize(_ id: CGDirectDisplayID) -> (width: Int, height: Int) {
+    if let mode = CGDisplayCopyDisplayMode(id) { return (mode.pixelWidth, mode.pixelHeight) }
+    return (CGDisplayPixelsWide(id), CGDisplayPixelsHigh(id))
 }
 // Only an explicit local permission action may trigger TCC or open Settings.
 // Use the same Swift process identity as capture and input injection.
@@ -333,9 +353,9 @@ func configureStream(edge: Double, fps: Double, displayID: CGDirectDisplayID) {
             }
             guard let display = currentDisplay else { done.signal(); return }
             let config = SCStreamConfiguration()
-            let scale = min(1.0, edge / Double(max(display.width, display.height)))
-            config.width = max(1, Int(Double(display.width) * scale))
-            config.height = max(1, Int(Double(display.height) * scale))
+            let pixels = pixelSize(displayID), scale = min(1.0, edge / Double(max(pixels.width, pixels.height)))
+            config.width = max(2, Int(Double(pixels.width) * scale) & ~1)
+            config.height = max(2, Int(Double(pixels.height) * scale) & ~1)
             config.showsCursor = true
             config.pixelFormat = kCVPixelFormatType_32BGRA
             config.queueDepth = 3
@@ -360,7 +380,8 @@ var reportedAt = 0.0, lastFrameAt = 0.0
 var cachedPixels: CVPixelBuffer?
 var cachedDisplayID: CGDirectDisplayID = 0
 var videoEncoder: VideoEncoder?
-var encoderEdge = 0.0, encoderFPS = 0.0
+var encoderWidth = 0, encoderHeight = 0, encoderRate = 0
+var encoderFPS = 0.0, lastVideoAlive = 0.0
 func videoBitrate(edge: Double, quality: Double, fps: Double) -> Int {
     let base: Double = edge >= 3500 ? 28_000_000 : edge >= 2400 ? 14_000_000 : edge >= 1700 ? 9_000_000 : edge >= 1200 ? 5_000_000 : 2_500_000
     let q = min(1.25, max(0.6, quality / 0.7))
@@ -370,25 +391,32 @@ while true {
     lock.lock(); let edge = maxEdge, quality = jpegQuality, fps = captureFPS, requested = requestedDisplay; lock.unlock()
     let ids = displayIds(), chosen = ids.contains(requested) ? requested : CGMainDisplayID()
     if edge != configuredEdge || fps != configuredFPS || currentDisplay?.displayID != chosen { configureStream(edge: edge, fps: fps, displayID: chosen) }
-    if videoMode {
-        if videoEncoder == nil || encoderEdge != edge || encoderFPS != fps {
-            let scale = min(1.0, edge / Double(max(CGDisplayPixelsWide(chosen), CGDisplayPixelsHigh(chosen))))
-            let w = max(2, Int(Double(CGDisplayPixelsWide(chosen)) * scale) & ~1)
-            let h = max(2, Int(Double(CGDisplayPixelsHigh(chosen)) * scale) & ~1)
-            videoEncoder = VideoEncoder(width: w, height: h, fps: fps, bitrate: videoBitrate(edge: edge, quality: quality, fps: fps))
-            encoderEdge = edge; encoderFPS = fps
-        }
-        if let fresh = frames.take() { videoEncoder?.encode(fresh) }
-        continue
-    }
     let now = ProcessInfo.processInfo.systemUptime
     if now - reportedAt >= 2 {
-        let info: [String: Any] = ["type": "displays", "capture": "screencapturekit", "maxEdge": 4096, "selected": String(chosen), "displays": ids.map { id in ["id": String(id), "width": CGDisplayPixelsWide(id), "height": CGDisplayPixelsHigh(id), "primary": id == CGMainDisplayID()] as [String: Any] }]
-        if let data = try? JSONSerialization.data(withJSONObject: info) {
-            var size = UInt32(data.count).bigEndian
-            FileHandle.standardOutput.write(Data(bytes: &size, count: 4)); FileHandle.standardOutput.write(data)
+        let displays = ids.map { id -> [String: Any] in
+            let pixels = pixelSize(id)
+            return ["id": String(id), "width": pixels.width, "height": pixels.height, "primary": id == CGMainDisplayID()]
         }
+        let info: [String: Any] = ["type": "displays", "capture": "screencapturekit", "maxEdge": 4096, "selected": String(chosen), "displays": displays]
+        if let data = try? JSONSerialization.data(withJSONObject: info) { writePacket(data) }
         reportedAt = now
+    }
+    if videoMode {
+        if let pixels = frames.take() {
+            let w = CVPixelBufferGetWidth(pixels), h = CVPixelBufferGetHeight(pixels)
+            let bitrate = videoBitrate(edge: Double(max(w, h)), quality: quality, fps: fps)
+            if videoEncoder == nil || encoderWidth != w || encoderHeight != h || encoderFPS != fps {
+                videoEncoder?.finish()
+                videoEncoder = VideoEncoder(width: w, height: h, fps: fps, bitrate: bitrate)
+                encoderWidth = w; encoderHeight = h; encoderFPS = fps
+            } else if bitrate != encoderRate { videoEncoder?.setBitrate(bitrate) }
+            encoderRate = bitrate
+            videoEncoder?.encode(pixels)
+        } else if now - lastVideoAlive >= 2 {
+            writePacket(Data([5]))
+            lastVideoAlive = now
+        }
+        continue
     }
     if cachedDisplayID != chosen { cachedPixels = nil; cachedDisplayID = chosen }
     let fresh = frames.take()
@@ -402,9 +430,7 @@ while true {
         guard let destination = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else { release(); fail("Cannot create JPEG encoder.") }
         CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
         guard CGImageDestinationFinalize(destination), data.length > 0, data.length <= 4194304 else { release(); fail("JPEG exceeds 4 MB or encoding failed.") }
-        var size = UInt32(data.length).bigEndian
-        FileHandle.standardOutput.write(Data(bytes: &size, count: 4))
-        FileHandle.standardOutput.write(data as Data)
+        writePacket(data as Data)
         lastFrameAt = ProcessInfo.processInfo.systemUptime
     }
     if acknowledged.wait(timeout: .now() + 15) == .timedOut { release(); fail("Frame consumer stopped responding.") }

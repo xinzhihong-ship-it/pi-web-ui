@@ -402,7 +402,7 @@ function startNativeDesktopOnce(
 				headerUsed = 0;
 				const length = header.readUInt32BE();
 				if (
-					length < (options.video ? (service ? 1 : 3) : 4) ||
+					length < (options.video ? 1 : 4) ||
 					length > (options.onRawFrame ? 32 * 1024 * 1024 : MAX_FRAME + (service && options.video ? 10 : 0))
 				) {
 					fail("Invalid native desktop frame length (maximum 4 MB).");
@@ -419,7 +419,7 @@ function startNativeDesktopOnce(
 			if (frameUsed === frame.length) {
 				const jpeg = frame;
 				frame = undefined;
-				if (jpeg[0] === 5 && jpeg.length === 1 && service && options.video) {
+				if (jpeg[0] === 5 && jpeg.length === 1 && options.video) {
 					armWatchdog();
 					options.onVideoAlive?.();
 					continue;
@@ -485,9 +485,17 @@ function startNativeDesktopOnce(
 					continue;
 				}
 				if (jpeg[0] === 0x02 && options.onVideo) {
+					if (jpeg.length < 3 || jpeg[1] > 3) return fail("Invalid native video frame.");
 					armWatchdog();
 					try {
-						options.onVideo({ data: jpeg.subarray(2), key: (jpeg[1] & 1) === 1 });
+						const data = jpeg.subarray(2),
+							key = Boolean(jpeg[1] & 1);
+						if (jpeg[1] & 2) videoReset = true;
+						if (displayConfirmed && (!videoReset || key)) {
+							videoCodec = h264Codec(data) ?? videoCodec;
+							options.onVideo({ data, key, reset: videoReset, codec: videoCodec });
+							videoReset = false;
+						}
 					} catch {
 						fail("Native desktop video consumer failed.");
 						return;
@@ -591,7 +599,9 @@ function startNativeDesktopOnce(
 						: inputOnly
 							? "input"
 							: options.video
-								? "video"
+								? readOnly
+									? "video-view"
+									: "video"
 								: options.preview
 									? "preview"
 									: readOnly

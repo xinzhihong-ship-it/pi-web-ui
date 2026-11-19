@@ -105,12 +105,15 @@ export class DesktopVideoFlow {
 		this.good = this.healthy >= this.samples * 0.9 ? this.good + 1 : 0;
 		this.samples = this.congested = this.severe = this.healthy = 0;
 		if (this.bad >= 2 || severe) {
-			if (this.qualityScale > 0.6) this.qualityScale = Math.max(0.6, this.qualityScale * 0.85);
-			else this.fpsScale = Math.max(0.25, this.fpsScale * 0.8);
+			// Keep text legible through ordinary congestion. Spend fewer frames
+			// before resorting to the lowest image quality on a persistently slow link.
+			if (this.qualityScale > 0.8) this.qualityScale = Math.max(0.8, this.qualityScale * 0.85);
+			else if (this.fpsScale > 0.25) this.fpsScale = Math.max(0.25, this.fpsScale * 0.8);
+			else this.qualityScale = Math.max(0.6, this.qualityScale * 0.85);
 			this.bad = this.good = 0;
 		} else if (this.good >= 30) {
-			if (this.fpsScale < 1) this.fpsScale = Math.min(1, this.fpsScale + 0.1);
-			else this.qualityScale = Math.min(1, this.qualityScale + 0.1);
+			if (this.qualityScale < 1) this.qualityScale = Math.min(1, this.qualityScale + 0.1);
+			else this.fpsScale = Math.min(1, this.fpsScale + 0.1);
 			this.good = 0;
 		}
 		return true;

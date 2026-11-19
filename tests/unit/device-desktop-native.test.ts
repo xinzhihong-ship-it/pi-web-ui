@@ -337,6 +337,31 @@ describe("native desktop lifecycle and framed capture", () => {
 		expect(o.onError).toHaveBeenCalledTimes(1);
 	});
 
+	it("recognizes idle Mac video heartbeats and decodes the stream's actual H.264 profile in view-only mode", async () => {
+		vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+		mocks.exec.mockReturnValue("/usr/bin/swift\n");
+		const { child, writes } = processFixture();
+		const opts = { ...options(true), video: true, onVideo: vi.fn(), onVideoAlive: vi.fn() };
+		const capture = startNativeDesktop(opts);
+		await Promise.resolve();
+		expect(mocks.spawn.mock.calls[0][1]).toEqual(["video-view"]);
+		child.stdout.write(packet(Buffer.from([2, 3, 0, 0, 1, 7, 66, 192, 31, 128, 0, 0, 1, 5, 128])));
+		expect(opts.onVideo).toHaveBeenCalledWith(
+			expect.objectContaining({ key: true, reset: true, codec: "avc1.42c01f" }),
+		);
+		for (let n = 0; n < 30; n++) {
+			vi.advanceTimersByTime(2000);
+			child.stdout.write(packet(Buffer.from([5])));
+		}
+		expect(opts.onVideo).toHaveBeenCalledTimes(1);
+		expect(opts.onVideoAlive).toHaveBeenCalledTimes(30);
+		expect(opts.onError).not.toHaveBeenCalled();
+		capture.input({ type: "text", text: "view only" });
+		expect(writes).toEqual([]);
+		capture.close();
+		child.emit("close", 0);
+	});
+
 	it("reassembles arbitrary header/payload splits and coalesced frames using one persistent process", () => {
 		const { child, writes } = processFixture();
 		const o = options();

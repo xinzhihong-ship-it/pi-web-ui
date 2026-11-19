@@ -35,7 +35,6 @@ it("reduces bitrate before FPS and recovers gradually, retaining explicit qualit
 	flow.ack(flow.frame(1000), 9, 1400);
 	flow.ack(flow.frame(2400), 9, 2800);
 	flow.ack(flow.frame(3400), 9, 3800);
-	flow.ack(flow.frame(4400), 9, 4800);
 	expect(flow.profile(base, true).quality).toBeLessThan(70);
 	expect(flow.profile(base, true).fps).toBe(120);
 	for (let t = 5000; t < 45000; t += 1000) flow.ack(flow.frame(t), 9, t + 400);
@@ -106,13 +105,20 @@ it("does not let a minority of timely ACKs hide delayed delivery for most frames
 	expect(flow.profile(base, true).quality).toBeLessThan(base.quality);
 });
 
-it("does not impose a five-second cooldown on sustained severe queueing", () => {
+it("reduces frame rate before making text very blurry, and restores detail first when congestion clears", () => {
 	const flow = new DesktopVideoFlow(),
 		base = { fps: 240, quality: 70 };
 	for (let t = 0; t < 1000; t += 100) flow.ack(flow.frame(t), 0, t + 30);
 	for (let t = 1000; t < 7000; t += 100) flow.ack(flow.frame(t), 10, t + 500);
-	expect(flow.profile(base, true).quality).toBe(42);
-	expect(flow.profile(base, true).fps).toBeLessThan(240);
+	const early = flow.profile(base, true);
+	expect(early.quality).toBe(56);
+	expect(early.fps).toBeLessThan(240);
+	for (let t = 7000; t < 24000; t += 100) flow.ack(flow.frame(t), 10, t + 500);
+	const worst = flow.profile(base, true);
+	expect(worst).toMatchObject({ quality: 42, fps: 60 });
+	for (let t = 25000; t < 59000; t += 100) flow.ack(flow.frame(t), 0, t + 30);
+	expect(flow.profile(base, true).quality).toBeGreaterThan(worst.quality);
+	expect(flow.profile(base, true).fps).toBe(worst.fps);
 });
 
 // Deterministic serial link, with independent frame generation and receiver ACKs.

@@ -588,8 +588,8 @@ export function createDeviceDesktop({
 		const statsTimer = setInterval(() => {
 			if (
 				videoFeedback &&
-				videoFlow.oldest !== undefined &&
-				performance.now() - videoFlow.oldest > DESKTOP_LIMITS.ackMs
+				videoFlow.progressAt !== undefined &&
+				performance.now() - videoFlow.progressAt > DESKTOP_LIMITS.ackMs
 			)
 				return fail("Desktop video receiver stopped responding. Reconnect to resume.");
 			if (ended || failing || !started || ws.readyState !== WebSocket.OPEN || ws.bufferedAmount > 65536) return;
@@ -659,6 +659,7 @@ export function createDeviceDesktop({
 					)
 						return cleanup();
 					if (videoFlow.ack(value.id, value.queue, performance.now())) {
+						if (flowPaused) armVideoStall();
 						applyProfile(videoFlow.profile(quality.profile, automatic));
 						paceVideo();
 					}

@@ -70,13 +70,15 @@ let filesSession = '';
 let videoMode = false, videoDecoder = null, videoTime = 0, videoDecodeAt = 0, videoCodec = '', videoState = null, videoAcceleration = '';
 const videoSupported = typeof VideoDecoder === 'function' && typeof EncodedVideoChunk === 'function';
 let videoProbe = false;
-if (videoSupported) {
- // Windows 用 High、macOS 用 Baseline：任一支持即可，具体 codec 由服务端下发。
- for (const codec of ['avc1.640033', 'avc1.42E01F', 'avc1.4D4028']) {
-  try { VideoDecoder.isConfigSupported({codec, avc:{format:'annexb'}}).then(result => { if (result.supported === true) videoProbe = true; }).catch(() => {}); } catch { /* Older builds throw on isConfigSupported. */ }
- }
-}
-let activePointer = null, retryTimer, awaitingDesktop = false;
+const probeReady = videoSupported ? new Promise(resolve => {
+ const codecs = ['avc1.640033', 'avc1.42E01F', 'avc1.4D4028'];
+ let remaining = codecs.length;
+ const deadline = setTimeout(resolve, 1500);
+ for (const codec of codecs) Promise.resolve().then(() => VideoDecoder.isConfigSupported({codec, avc:{format:'annexb'}}))
+  .then(result => { if (result.supported) videoProbe = true; }, () => {})
+  .finally(() => { if (!--remaining || videoProbe) { clearTimeout(deadline); resolve(); } });
+}) : Promise.resolve();
+let activePointer = null, retryTimer, awaitingDesktop = false, transportFailures = 0, lastRouteRetry = -Infinity;
 let rendered = 0, sampleAt = performance.now(), decodeMs = 0, lastCaptured = 0, lastSent = 0, lastStatsElapsed = 0;
 let selectedDisplay = '', captureBackend = '';
 let dynamicQuality = false, qualityTimer, lastQuality = '';
@@ -111,7 +113,8 @@ function updateQuality() {
  clearTimeout(qualityTimer);
  qualityTimer = setTimeout(() => {
   if (!valid || !dynamicQuality || !ready || socket?.readyState !== WebSocket.OPEN) return;
-  const viewportEdge = Math.max(640, Math.min(resolutionLimit, Math.round(Math.max(screen.clientWidth, screen.clientHeight) * Math.min(devicePixelRatio || 1, 2))));
+  if (!screen.clientWidth || !screen.clientHeight) return;
+  const viewportEdge = Math.max(640, Math.min(resolutionLimit, Math.round(Math.max(screen.clientWidth, screen.clientHeight) * (devicePixelRatio || 1))));
   const edge=resolveDesktopResolution($('quality-resolution').value,Number($('quality-width').value),Number($('quality-height').value),sourceWidth,sourceHeight,viewportEdge,resolutionLimit);
   if(edge===undefined)return;
   const message = {type:'configure', mode:$('quality-mode').value, maxEdge:$('quality-resolution').value==='window'?0:edge, viewportEdge, fps:Number($('quality-fps').value),...(colorSupported?{colorRange:$('quality-color').value}:{})};
@@ -172,10 +175,19 @@ function stop() {
 }
 function scheduleRecovery() {
  clearTimeout(retryTimer);
- if (awaitingDesktop && !disposed && !document.hidden) retryTimer = setTimeout(() => { if (awaitingDesktop) connect(); }, 10000);
+ const delay = transportFailures ? Math.min(10000, 1000 * 2 ** Math.min(transportFailures - 1, 4)) : 10000;
+ if (awaitingDesktop && !disposed && !document.hidden) retryTimer = setTimeout(() => { if (awaitingDesktop) connect(); }, delay);
 }
 function fail(message, retry = false) {
  stop(); awaitingDesktop = retry; status(message, true); controls(); scheduleRecovery();
+}
+function transportLost(message) {
+ transportFailures++;
+ fail(message + (zh ? ' · 正在重连…' : ' · Reconnecting…'), true);
+ if (transportFailures >= 2 && performance.now() - lastRouteRetry >= 20000) {
+  lastRouteRetry = performance.now();
+  parent.postMessage({type:'device-portal-disconnected'}, '*');
+ }
 }
 async function decodeFrames() {
  if (decoding) return;
@@ -189,7 +201,12 @@ async function decodeFrames() {
     bitmap = await createImageBitmap(frame.blob);
     if (disposed || frame.generation !== generation || frame.socket !== socket || socket.readyState !== WebSocket.OPEN) continue;
     if (!bitmap.width || !bitmap.height) throw new Error('Empty image');
-    await new Promise(resolve => { if(document.hidden) setTimeout(resolve,100); else requestAnimationFrame(resolve); });
+    if (!document.hidden) await new Promise(resolve => {
+     let paint;
+     const finish = () => { document.removeEventListener?.('visibilitychange', finish); globalThis.cancelAnimationFrame?.(paint); resolve(); };
+     document.addEventListener?.('visibilitychange', finish, {once:true});
+     paint = requestAnimationFrame(finish);
+    });
     if(disposed || frame.generation !== generation || frame.socket !== socket) continue;
     const firstFrame = !hasFrame;
     // Resizing clears the bitmap: resize and paint in the same animation tick.
@@ -329,6 +346,7 @@ function connect() {
  url.searchParams.set('jpegFeedback', '1');
  if(selectedDisplay) url.searchParams.set('display',selectedDisplay);
  const currentGeneration = generation;
+ const openedAt = performance.now();
  let current;
  try { current = new WebSocket(url); } catch (error) { fail(t('connectionError') + ': ' + error.message); return; }
  socket = current; current.binaryType = 'blob'; status(t('connecting')); controls();
@@ -351,8 +369,14 @@ function connect() {
    pendingFrame = {blob:event.data, generation:currentGeneration, socket:current, ack:jpegFeedback ? {type:'jpeg_ack',id} : {type:'ack'}}; void decodeFrames();
   }
  };
- current.onerror = () => { if (isCurrent()) { fail(t('connectionError')); parent.postMessage({type:'device-portal-disconnected'}, '*'); } };
- current.onclose = event => { if (isCurrent()) { stop(); status(t('closed') + ' (' + event.code + ')' + (event.reason ? ': ' + event.reason : ''), true); parent.postMessage({type:'device-portal-disconnected'}, '*'); } };
+ current.onerror = () => { if (isCurrent()) status(t('connectionError'), true); };
+ current.onclose = event => {
+  if (!isCurrent()) return;
+  if (hasFrame && performance.now() - openedAt >= 10000) { transportFailures = 0; lastRouteRetry = -Infinity; }
+  const message = t('closed') + ' (' + event.code + ')' + (event.reason ? ': ' + event.reason : '');
+  if ([1000,1001,1005,1006,1011,1012,1013,1014].includes(event.code)) transportLost(message);
+  else fail(message);
+ };
 }
 async function request(path, options = {}) {
  const response = await fetch(appUrl(path), {...options, credentials:'same-origin', cache:'no-store'});
@@ -383,6 +407,7 @@ async function update(enabled, autoConnect = false) {
   let next;
   try { next = await request('api/device-desktop/status'); }
   catch { next = await request('api/device-desktop/setup/status'); }
+  if (autoConnect || enabled === true) await probeReady;
   if (!disposed) {
    applyConfig(next);
    if ((autoConnect || enabled === true) && canConnect()) connect();
@@ -443,8 +468,8 @@ $('text-form').addEventListener('submit', event => {
  if (input.value && send({type:'text', text:input.value})) input.value = '';
 });
 $('text').addEventListener('keydown', event => { if (event.key === 'Enter' && event.isComposing) event.preventDefault(); });
-$('connect').onclick = connect;
-$('disconnect').onclick = () => { stop(); status(t('disconnected')); };
+$('connect').onclick = () => { transportFailures = 0; connect(); };
+$('disconnect').onclick = () => { transportFailures = 0; stop(); status(t('disconnected')); };
 $('check').onclick = () => void update();
 $('enable').onclick = () => void update(true);
 $('disable').onclick = () => void update(false);
