@@ -15,6 +15,7 @@ export function clipboardConnection(ws: WebSocket, backend: ClipboardBackend, wr
 		canRead = false,
 		canWrite = false,
 		manual = false,
+		browserMedia = false,
 		reading = false,
 		dirty = false;
 	let stream = false,
@@ -186,7 +187,7 @@ export function clipboardConnection(ws: WebSocket, backend: ClipboardBackend, wr
 		}, 250);
 		let source: ClipboardSource | undefined;
 		try {
-			if (backend.readSource) source = await backend.readSource(lifetime.signal, maxBytes);
+			if (backend.readSource) source = await backend.readSource(lifetime.signal, maxBytes, browserMedia);
 			else {
 				const content = await backend.read();
 				if (content) source = bufferClipboardSource(content);
@@ -258,6 +259,7 @@ export function clipboardConnection(ws: WebSocket, backend: ClipboardBackend, wr
 		if (v.type === "start" && !started && typeof v.read === "boolean" && typeof v.write === "boolean") {
 			started = true;
 			manual = v.manual === true;
+			browserMedia = v.browserMedia === true;
 			canRead = v.read;
 			canWrite = v.write && writable;
 			if (v.write && !writable) return fatal("clipboard-readonly");

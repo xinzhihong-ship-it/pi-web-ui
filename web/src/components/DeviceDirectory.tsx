@@ -39,6 +39,16 @@ export function DeviceDirectory({
 }) {
 	const t = useT();
 	const [devices, setDevices] = useState<Device[]>([]);
+	const handoffQuery = new URLSearchParams(window.location.search);
+	const handoffHub = deviceTarget(hubUrl, "");
+	const handoffDevice =
+		variant === "page" &&
+		window === window.top &&
+		["localhost", "127.0.0.1", "[::1]"].includes(location.hostname) &&
+		handoffHub &&
+		new URL(handoffHub).origin === handoffQuery.get("clipboardHub")
+			? devices.find((d) => d.id === handoffQuery.get("clipboardDevice") && d.online)
+			: undefined;
 	const [error, setError] = useState("");
 	const [refresh, setRefresh] = useState(0);
 	const [editingId, setEditingId] = useState<string | null>(null);
@@ -163,6 +173,26 @@ export function DeviceDirectory({
 				<p className="dc-notice is-error" role="alert">
 					{error}
 				</p>
+			)}
+			{handoffDevice && (
+				<button
+					type="button"
+					className="dc-button"
+					onClick={() => {
+						void openDeviceAccess(
+							handoffDevice.id,
+							hubUrl,
+							true,
+							t,
+							false,
+							handoffDevice.remark || handoffDevice.name,
+							{ mode: "live" },
+						).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+					}}
+				>
+					<FiMonitor aria-hidden />
+					{t("deviceDirectory.remoteDesktop")} · {handoffDevice.remark || handoffDevice.name}
+				</button>
 			)}
 			<div className="dd-list">
 				{devices.map((device) => {

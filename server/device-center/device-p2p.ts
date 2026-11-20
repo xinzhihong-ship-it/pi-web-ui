@@ -248,8 +248,12 @@ async function startHelper() {
 		for (const listener of listeners) listener();
 		listeners.clear();
 		child.stdin.end();
-		// 先给 2s 让它自己退（stdin 已关），没退就由 stop() 杀整棵树。
-		void stop({ graceMs: 2000, timeoutMs: 5000 });
+		if (child.pid && child.exitCode === null && child.signalCode === null) {
+			// EOF lets the helper notify its peer before exiting. SIGTERM immediately terminates it on Windows.
+			const deadline = setTimeout(() => void stop({ timeoutMs: 5000 }), 2000);
+			deadline.unref();
+			child.once("exit", () => clearTimeout(deadline));
+		}
 	};
 	running.add(close);
 	child.once("error", close);

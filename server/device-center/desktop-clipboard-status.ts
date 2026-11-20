@@ -17,6 +17,22 @@ export function clipboardStatus(code: string, zh: boolean): string | undefined {
 	}
 	if (!code.startsWith("warning:")) return;
 	const messages: Record<string, [string, string]> = {
+		"clipboard-webcontext": [
+			"请用 HTTPS 打开 Hub 并允许剪贴板访问，也可在下方手动传文本。",
+			"Open the Hub over HTTPS and allow clipboard access, or transfer text manually below.",
+		],
+		"clipboard-webpermission": [
+			"请允许此页面读取剪贴板；也可选择关闭后手动传文本。",
+			"Allow this page to read the clipboard, or choose Off to transfer text manually.",
+		],
+		"clipboard-webapply": [
+			"已收到远程内容。请回到此页并点击“复制到本机”完成本次接收。",
+			"Remote content received. Return to this page and click Copy locally to apply it.",
+		],
+		"clipboard-webfiles": [
+			"请用桌面工具栏的“文件传输”发送或接收文件和文件夹。",
+			"Use File transfer in the desktop toolbar to send or receive files and folders.",
+		],
 		"clipboard-folder": [
 			"文件夹没有同步，剪贴板仍是原来的内容。请点击“文件传输”选择文件夹发送。",
 			"Folder not synced; the previous clipboard is unchanged. Use File transfer → Send folder.",

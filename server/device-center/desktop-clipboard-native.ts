@@ -17,7 +17,7 @@ export interface ClipboardBackend {
 	read(): Promise<ClipboardContent | undefined>;
 	write(content: ClipboardContent): Promise<void>;
 	watch(changed: () => void): () => void;
-	readSource?(signal: AbortSignal, maxBytes: number): Promise<ClipboardSource | undefined>;
+	readSource?(signal: AbortSignal, maxBytes: number, browserMedia?: boolean): Promise<ClipboardSource | undefined>;
 	receiveFiles?(offer: ClipboardOffer, signal: AbortSignal): Promise<ClipboardSink>;
 }
 export function clipboardDigest(content: ClipboardContent): string {
@@ -92,9 +92,10 @@ export async function createNativeClipboard(): Promise<ClipboardBackend> {
 		}
 	}
 	const backend: ClipboardBackend = {
-		async readSource(signal, maxBytes) {
+		async readSource(signal, maxBytes, browserMedia) {
 			if (writing) return;
 			if (api.hasFiles()) {
+				if (browserMedia) throw new Error("clipboard-webfiles");
 				const paths = await api.getFiles();
 				if (!paths.length || paths.length > CLIPBOARD_LIMITS.files) throw new Error("clipboard-size");
 				for (const path of paths) if ((await lstat(path)).isDirectory()) throw new Error("clipboard-folder");
@@ -310,7 +311,7 @@ export async function createNativeClipboard(): Promise<ClipboardBackend> {
 		read: () => serial(() => backend.read()),
 		write: (content) => serial(() => backend.write(content)),
 		watch: backend.watch,
-		readSource: (signal, maxBytes) => serial(() => backend.readSource!(signal, maxBytes)),
+		readSource: (signal, maxBytes, browserMedia) => serial(() => backend.readSource!(signal, maxBytes, browserMedia)),
 		receiveFiles: (offer, signal) => backend.receiveFiles!(offer, signal),
 	};
 }

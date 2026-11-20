@@ -6,7 +6,8 @@ import { pageDeviceId } from "../device-access";
 import { createClipboardBridge } from "../desktop-clipboard-bridge";
 import type { ClipboardMode } from "../../../server/device-center/desktop-clipboard-protocol";
 import { isZhLocale, useI18n, useT } from "../i18n";
-import { manualClipboardControls, manualClipboardCss } from "../../../server/device-center/desktop-clipboard-manual";
+import { manualClipboardCss } from "../../../server/device-center/desktop-clipboard-manual";
+import { browserClipboardControls } from "../../../server/device-center/desktop-clipboard-web-controls";
 import { clipboardDialog, clipboardDialogCss } from "../../../server/device-center/desktop-clipboard-dialog";
 import { desktopPreferences } from "../../../server/device-center/desktop-preferences";
 import { clipboardStatus } from "../../../server/device-center/desktop-clipboard-status";
@@ -49,7 +50,12 @@ export function DesktopClipboardControl({
 		setDialogHost(popup?.host ?? null);
 		const manual =
 			popup && !native
-				? manualClipboardControls({
+				? browserClipboardControls({
+						preferences,
+						openFiles: () => {
+							popup.hide();
+							frame.current?.contentWindow?.postMessage({ type: "desktop-clipboard-files" }, "*");
+						},
 						host: popup.host,
 						post: (data) => frame.current?.contentWindow?.postMessage(data, "*"),
 						zh,
@@ -61,7 +67,7 @@ export function DesktopClipboardControl({
 				nested &&
 				event.source === parent &&
 				parent !== window &&
-				["desktop-clipboard", "desktop-clipboard-status"].includes(event.data?.type)
+				["desktop-clipboard", "desktop-clipboard-status", "desktop-clipboard-files"].includes(event.data?.type)
 			) {
 				frame.current?.contentWindow?.postMessage(event.data, "*");
 				return;

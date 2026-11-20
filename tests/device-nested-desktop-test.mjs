@@ -1,3 +1,4 @@
+import { verifyHubClipboard } from "./lib/hub-clipboard-browser.mjs";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { readFile, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
@@ -66,12 +67,20 @@ try {
 		["pc-c", 8994],
 	]) {
 		let content = { kind: "text", items: [{ name: "text.txt", data: Buffer.from(id + " clipboard") }] };
+		const listeners = new Set();
 		const backend = {
+			copy: async (value) => {
+				content = value;
+				for (const callback of listeners) callback();
+			},
 			read: async () => content,
 			write: async (value) => {
 				content = value;
 			},
-			watch: () => () => {},
+			watch: (cb) => {
+				listeners.add(cb);
+				return () => listeners.delete(cb);
+			},
 		};
 		backends.set(id, backend);
 		const app = express();
@@ -424,6 +433,7 @@ try {
 	await nativeDialog.getByText("Completed · verified", { exact: true }).waitFor();
 	assert.deepEqual(await readFile(join(home, "pc-b", "lan-archive.zip")), archiveBytes);
 	await localPage.close();
+	await verifyHubClipboard(browser, origin, backends.get("pc-b"));
 	console.log(
 		"PASS: real Hub + two device connectors, nested preview/control, clipboard identity, independent tab and return.",
 	);

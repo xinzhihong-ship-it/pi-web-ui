@@ -20,9 +20,7 @@ export function manualClipboardControls(options: {
 		note = document.createElement("p"),
 		status = document.createElement("span");
 	status.setAttribute("role", "status");
-	note.textContent = zh
-		? "浏览器模式需手动发送/接收文本（最多 16 KiB）。文本、图片、文件自动同步请从本机 localhost 的 pi-web-ui 打开设备。"
-		: "Manually send/receive text (up to 16 KiB). For automatic text, image and file sync, open the device from your local pi-web-ui.";
+	note.textContent = zh ? "手动发送或接收文本，每次最多 16 KiB。" : "Manually send or receive up to 16 KiB of text.";
 	const button = (label: string, run: () => void) => {
 		const element = document.createElement("button");
 		element.type = "button";
@@ -134,8 +132,8 @@ export function manualClipboardControls(options: {
 				stop();
 				status.textContent = value.error
 					? zh
-						? "当前内容不是文本、超过限制或无法读取。图片和文件请使用本机客户端同步。"
-						: "Not text, too large, or unavailable. Use the local client for images and files."
+						? "当前内容不是文本、超过限制或无法读取。图片可使用上方同步方向，文件请使用文件传输。"
+						: "Not text, too large, or unavailable. Use the direction selector for images and File transfer for files."
 					: value.written
 						? zh
 							? "已写入远程剪贴板，可在远程粘贴。"
@@ -152,4 +150,4 @@ export function manualClipboardControls(options: {
 	};
 }
 
-export const manualClipboardCss = `.browser-clipboard{flex:none;padding:6px 10px;background:var(--bg-elev,#17181c);color:var(--text,#eee);font:12px system-ui;max-height:38vh;overflow:auto}.browser-clipboard[hidden]{display:none}.browser-clipboard summary{cursor:pointer}.browser-clipboard textarea{box-sizing:border-box;display:block;width:100%;height:70px;margin:8px 0;background:var(--bg,#17181c);color:inherit;border:1px solid var(--border,#555);border-radius:6px;resize:vertical}.browser-clipboard button{margin:0 6px 6px 0;padding:5px 8px;font:inherit;background:var(--bg,#303137);color:inherit;border:1px solid var(--border,#555);border-radius:6px}.browser-clipboard p{margin:6px 0;max-width:none;overflow-wrap:anywhere}.browser-clipboard button:disabled{opacity:.5}`;
+export const manualClipboardCss = `.browser-clipboard{flex:none;padding:6px 10px;background:var(--bg-elev,#17181c);color:var(--text,#eee);font:12px system-ui;max-height:38vh;overflow:auto}.browser-clipboard[hidden]{display:none}.browser-clipboard summary{cursor:pointer}.browser-clipboard textarea{box-sizing:border-box;display:block;width:100%;height:70px;margin:8px 0;background:var(--bg,#17181c);color:inherit;border:1px solid var(--border,#555);border-radius:6px;resize:vertical}.browser-clipboard button{margin:0 6px 6px 0;padding:5px 8px;font:inherit;background:var(--bg,#303137);color:inherit;border:1px solid var(--border,#555);border-radius:6px}.browser-clipboard p{margin:6px 0;max-width:none;overflow-wrap:anywhere}.web-clipboard-native{margin-top:10px}.web-clipboard-native label,.web-clipboard-native a{display:inline-block;margin:8px 8px 0 0}.web-clipboard-native input{width:6em}.browser-clipboard button:disabled{opacity:.5}.web-clipboard-modes{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}.web-clipboard-modes select{font:inherit;background:var(--bg,#17181c);color:inherit;border:1px solid var(--border,#555);border-radius:6px;padding:4px}.web-clipboard-modes [role=status]{flex-basis:100%;color:var(--text-dim,#aaa);overflow-wrap:anywhere}`;
