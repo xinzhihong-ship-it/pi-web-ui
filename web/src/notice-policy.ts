@@ -1,4 +1,5 @@
 export interface NoticeLike {
+	schedulerTaskId?: string;
 	id: number;
 	level: "info" | "warning" | "error";
 	text: string;
@@ -60,7 +61,9 @@ export function enqueueNotice<T extends NoticeLike>(
 		return current as T[];
 	}
 	const incomingKey = `${incoming.level}:${(incoming.text ?? "").trim()}`;
-	const deduped = current.filter((n) => `${n.level}:${(n.text ?? "").trim()}` !== incomingKey);
+	const deduped = current.filter(
+		(n) => n.schedulerTaskId !== incoming.schedulerTaskId || `${n.level}:${(n.text ?? "").trim()}` !== incomingKey,
+	);
 	const next = [...deduped, incoming];
 	while (next.length > maxVisible) {
 		const nonErrorIdx = next.findIndex((n) => n.level !== "error");

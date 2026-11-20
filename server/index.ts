@@ -2295,143 +2295,13 @@ const scheduler = new SchedulerStore(DATA_DIR, {
 		if (task.target === "canvas") {
 			return executeScheduledCanvas(DATA_DIR, canvasOrchestrator, task);
 		}
-		let result: { ok: boolean; conversationId?: string; error?: string };
-		try {
-			const svc = ensureEngine("pi") as unknown as {
-				chatFromScheduler?: (t: {
-					id: string;
-					name?: string;
-					cwd: string;
-					prompt: string;
-					model?: string;
-					thinkingLevel?: string;
-				}) => Promise<{ ok: boolean; conversationId?: string; error?: string }>;
-				wakeConversation?: (
-					id: string,
-					text: string,
-					opts?: { sessionFile?: string; cwd?: string },
-				) => Promise<{
-					ok: boolean;
-					conversationId?: string;
-					sessionFile?: string;
-					clientId?: string;
-					busy?: boolean;
-					error?: string;
-				}>;
-				wakeViewportInCwd?: (
-					cwd: string,
-					text: string,
-				) => Promise<{
-					ok: boolean;
-					conversationId?: string;
-					sessionFile?: string;
-					clientId?: string;
-					busy?: boolean;
-					error?: string;
-				}>;
-			};
-			if (typeof svc.chatFromScheduler !== "function" && typeof svc.wakeConversation !== "function") {
-				result = { ok: false, error: "当前引擎不支持定时任务（仅标准 pi 引擎）" };
-			} else {
-				const runHeadless = (): Promise<{ ok: boolean; conversationId?: string; error?: string }> =>
-					svc.chatFromScheduler!({
-						id: task.id,
-						name: task.name,
-						cwd: task.cwd,
-						prompt: task.prompt,
-						model: task.model,
-						thinkingLevel: task.thinkingLevel,
-					});
-				const target = String(task.conversationId ?? "").trim();
-				const taskFile = String((task as { sessionFile?: unknown }).sessionFile ?? "").trim();
-				const text = `[定时任务 ${task.name}] ${task.prompt}`;
-				if (!target && !taskFile) {
-					result = await runHeadless();
-				} else if (typeof svc.wakeConversation === "function") {
-					let w: {
-						ok: boolean;
-						conversationId?: string;
-						sessionFile?: string;
-						busy?: boolean;
-						error?: string;
-					};
-					try {
-						w = await svc.wakeConversation(target, text, { sessionFile: taskFile, cwd: task.cwd });
-					} catch (err) {
-						w = { ok: false, error: (err as Error).message };
-					}
-					if (w.ok) {
-						if (!task.oneShot) {
-							try {
-								if (w.conversationId && w.conversationId !== target)
-									scheduler.rebind(task.id, { conversationId: w.conversationId });
-								if (w.sessionFile && w.sessionFile !== taskFile)
-									scheduler.rebind(task.id, { sessionFile: w.sessionFile });
-							} catch {}
-						}
-						result = { ok: true, conversationId: w.conversationId };
-					} else if (typeof svc.wakeViewportInCwd === "function") {
-						const fallbackText = `[定时任务 ${task.name}｜原对话不在，已转到本窗口继续] ${task.prompt}`;
-						let f: {
-							ok: boolean;
-							conversationId?: string;
-							sessionFile?: string;
-							busy?: boolean;
-							error?: string;
-						};
-						try {
-							f = await svc.wakeViewportInCwd(task.cwd, fallbackText);
-						} catch (err) {
-							f = { ok: false, error: (err as Error).message };
-						}
-						if (f.ok) {
-							if (!task.oneShot) {
-								try {
-									scheduler.rebind(task.id, {
-										conversationId: f.conversationId ?? "",
-										sessionFile: f.sessionFile ?? "",
-									});
-								} catch {}
-							}
-							pushNoticeToAll(
-								"info",
-								`定时任务「${task.name}」原对话不在，已转到同项目的活跃对话继续（原绑定 ${target || "（未知）"}）。报告直接落在当前对话。`,
-								`Scheduled task "${task.name}" moved to the project's active conversation (was ${target || "unknown"}). The report lands in the current chat.`,
-							);
-							result = { ok: true, conversationId: f.conversationId };
-						} else {
-							pushNoticeToAll(
-								"warning",
-								`定时任务「${task.name}」原对话不在、同项目也无存活对话，已转后台执行（无头）。报告在后台任务面板的调度历史中查看。`,
-								`Scheduled task "${task.name}" found no live conversation and runs headless; see its report in the background-tasks panel history.`,
-							);
-							if (!task.oneShot) {
-								try {
-									scheduler.rebind(task.id, { conversationId: "", sessionFile: "" });
-								} catch {}
-							}
-							result = await runHeadless();
-						}
-					} else {
-						result = await runHeadless();
-					}
-				} else {
-					result = await runHeadless();
-				}
-			}
-		} catch (err) {
-			result = { ok: false, error: (err as Error).message };
-		}
-		return result;
+		const svc = ensureEngine("pi");
+		if (!(svc instanceof AgentService)) return { ok: false, error: "当前引擎不支持定时任务" };
+		return svc.chatFromScheduler(task);
 	},
 	onChange: () => pushSchedulerTasks(),
 	notify: (level, text, textEn) => pushNoticeToAll(level, text, textEn ?? text),
-	onTaskRemoved: (taskId) => {
-		const svc = piServiceInstance as unknown as { releaseSchedulerClient?: (id: string) => void } | null;
-		try {
-			svc?.releaseSchedulerClient?.(taskId);
-		} catch {}
-	},
+	onTaskRemoved: (taskId) => piServiceInstance?.releaseSchedulerClient(taskId),
 });
 // 定时任务不再在模块顶层直接 start —— 由 backgroundExecutors 的 boot 阶段统一拉起，
 // 这样它的启用时机、失败与健康快照和其它常驻执行者一致。
@@ -3279,7 +3149,7 @@ wss.on("connection", (ws) => {
 				return;
 			if (handleSessionLifecycleMessage(msg, cs, send, service, clientId)) return;
 			if (handlePlanAndGoalMessage(msg, cs)) return;
-			if (handleScheduleMessage(msg, scheduler, send)) return;
+			if (handleScheduleMessage(msg, scheduler, send, cs instanceof ClientSession ? cs : undefined)) return;
 			if (handleRemoteSshMessage(msg, remoteSshService, send)) return;
 			if (handleSettingsMessage(msg, cs, send)) return;
 			if (handleCanvasMessage(msg, DATA_DIR, canvasOrchestrator, send, { runBase: cs.cwd })) return;

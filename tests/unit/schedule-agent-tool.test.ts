@@ -52,33 +52,33 @@ describe("normalizeSchedulerInput 新字段", () => {
 	});
 });
 
-describe("AgentService.wakeConversation（无持有方路径）", () => {
-	let dir: string;
-	beforeEach(() => {
-		dir = mkdtempSync(join(tmpdir(), "sched-wake-test-"));
-	});
-	afterEach(() => {
-		rmSync(dir, { recursive: true, force: true });
-	});
-	it("找不到对话回 ok:false；空参回错；quiesce 直接拒绝", async () => {
-		const svc = new AgentService(dir, join(dir, "client-state.json"));
-		const miss = await svc.wakeConversation("c-nope", "hi");
-		expect(miss.ok).toBe(false);
-		expect(miss.error).toContain("不在运行中");
-		expect(await svc.wakeConversation("", "hi")).toMatchObject({ ok: false });
-		const miss2 = await svc.wakeConversation("c-nope", "hi", {
-			sessionFile: "/tmp/nope.jsonl",
-			cwd: dir,
-		});
-		expect(miss2.ok).toBe(false);
-		expect(miss2.busy).not.toBe(true);
-		const vp = await svc.wakeViewportInCwd(dir, "hi");
-		expect(vp.ok).toBe(false);
-		svc.quiesce();
-		const q = await svc.wakeConversation("c-nope", "hi");
-		expect(q.ok).toBe(false);
-		expect(q.error).toContain("quiesced");
-		expect(await svc.wakeViewportInCwd(dir, "hi")).toMatchObject({ ok: false });
+describe("AgentService scheduled conversation identity", () => {
+	it("fails closed for a lost transcript or volatile conversation id", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "sched-target-"));
+		try {
+			const service = new AgentService(dir, join(dir, "state.json"));
+			const task = normalizeSchedulerInput({
+				cwd: dir,
+				prompt: "TEST",
+				name: "Test",
+				kind: "interval",
+				spec: 60000,
+				conversationId: "c1",
+			});
+			expect(await service.chatFromScheduler(task)).toMatchObject({ ok: false, error: expect.stringContaining("c1") });
+			const sessionFile = join(dir, "absent.jsonl");
+			expect(await service.chatFromScheduler({ ...task, sessionFile })).toMatchObject({
+				ok: false,
+				error: expect.stringContaining(sessionFile),
+			});
+			service.quiesce();
+			expect(await service.chatFromScheduler(task)).toMatchObject({
+				ok: false,
+				error: expect.stringContaining("quiesced"),
+			});
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
 
@@ -111,7 +111,7 @@ describe("schedule 工具闭环（单 action：create/list/cancel）", () => {
 		const r = await call({ action: "create", schedule: "in 30m", prompt: "检查训练日志并汇报" });
 		const text = resultText(r);
 		expect(text).toContain("定时任务已创建");
-		expect(text).toContain("单次，触发后自动删除");
+		expect(text).toContain("单次，成功后自动删除");
 		expect(text).toContain('schedule(action="cancel"');
 		const tasks = store.list();
 		expect(tasks).toHaveLength(1);

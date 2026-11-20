@@ -229,7 +229,15 @@ function transitionLabel(transition: TransitionView, locale: string, t: Translat
 	return !isZhLocale(locale) && transition.textEn ? transition.textEn : transition.text;
 }
 
-function NoticeToast({ notice, onDismiss }: { notice: Notice; onDismiss: (id: number) => void }) {
+function NoticeToast({
+	notice,
+	onDismiss,
+	onOpenTask,
+}: {
+	notice: Notice;
+	onDismiss: (id: number) => void;
+	onOpenTask: (taskId: string, noticeId: number) => void;
+}) {
 	const t = useT();
 	const { locale } = useI18n();
 	const text = !isZhLocale(locale) && notice.textEn ? notice.textEn : notice.text;
@@ -253,6 +261,19 @@ function NoticeToast({ notice, onDismiss }: { notice: Notice; onDismiss: (id: nu
 		>
 			<Icon className="notice-icon" />
 			<span className="notice-text">{text}</span>
+			{notice.schedulerTaskId && (
+				<button
+					type="button"
+					className="scheduler-link"
+					onClick={(e) => {
+						e.stopPropagation();
+						onOpenTask(notice.schedulerTaskId!, notice.id);
+						onDismiss(notice.id);
+					}}
+				>
+					{t("settingsScheduler")} · {t("schedulerHistory")}
+				</button>
+			)}
 			<button
 				type="button"
 				className="notice-close"
@@ -1205,7 +1226,9 @@ export function App() {
 	};
 	const [manageModelsOpen, setManageModelsOpen] = useState(false);
 	const [settingsOpen, setSettingsOpen] = useState(false);
-	const [settingsInitialSection, setSettingsInitialSection] = useState<"plugins" | undefined>();
+	const [settingsInitialSection, setSettingsInitialSection] = useState<
+		"plugins" | { taskId: string; noticeId: number } | undefined
+	>();
 	const [sandboxModalMode, setSandboxModalMode] = useState<"create" | "promote" | "apply" | null>(null);
 	const openSandboxCreateModal = useCallback(() => setSandboxModalMode("create"), []);
 	// 项目选择器由 App 单实例持有：顶栏 chip、侧栏停靠栏、cwd chip 都能打开同一个。
@@ -2690,7 +2713,15 @@ export function App() {
 			{chat.protocolMismatch && <div className="protocol-banner">⚠ {t("protocolMismatch")}</div>}
 			<div className="notices">
 				{chat.notices.map((n) => (
-					<NoticeToast key={n.id} notice={n} onDismiss={dismissNotice} />
+					<NoticeToast
+						key={n.id}
+						notice={n}
+						onDismiss={dismissNotice}
+						onOpenTask={(taskId, noticeId) => {
+							setSettingsInitialSection({ taskId, noticeId });
+							setSettingsOpen(true);
+						}}
+					/>
 				))}
 				{pluginNotify && (
 					<div className="notice notice-info" role="status">
@@ -3562,7 +3593,9 @@ export function App() {
 					<SettingsModal
 						chat={chat}
 						terminal={terminal}
-						initialSection={settingsInitialSection}
+						key={typeof settingsInitialSection === "object" ? settingsInitialSection.noticeId : "settings"}
+						initialSection={typeof settingsInitialSection === "object" ? "scheduler" : settingsInitialSection}
+						focusedTaskId={typeof settingsInitialSection === "object" ? settingsInitialSection.taskId : undefined}
 						onSwitchToTerminal={() => {
 							setSettingsOpen(false);
 							openTerminalDrawer();

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
 	FiActivity,
@@ -23,6 +23,8 @@ import { useEscapeKey } from "../shortcut-stack";
 import { HintTip } from "./HintTip";
 
 interface SchedulerPanelProps {
+	focusedTaskId?: string;
+	onOpenTranscript?: (path: string) => void;
 	tasks: SchedulerTaskView[];
 	cwd: string;
 	models: UiVisionBridgeModel[];
@@ -204,7 +206,7 @@ function formatTime(ts: number | null): string {
 	}
 }
 
-export function SchedulerPanel({ tasks, cwd, models }: SchedulerPanelProps) {
+export function SchedulerPanel({ tasks, cwd, models, focusedTaskId, onOpenTranscript }: SchedulerPanelProps) {
 	const t = useT();
 	const [draft, setDraft] = useState<Draft | null>(null);
 	const [isNew, setIsNew] = useState(false);
@@ -225,7 +227,12 @@ export function SchedulerPanel({ tasks, cwd, models }: SchedulerPanelProps) {
 			active = false;
 		};
 	}, [draftTarget, cwd]);
-	const [openHistory, setOpenHistory] = useState<Set<string>>(new Set());
+	const [openHistory, setOpenHistory] = useState<Set<string>>(() => new Set(focusedTaskId ? [focusedTaskId] : []));
+	const focusedRow = useRef<HTMLLIElement>(null);
+	const focusedTaskLoaded = tasks.some((task) => task.id === focusedTaskId);
+	useEffect(() => {
+		if (focusedTaskLoaded) focusedRow.current?.scrollIntoView?.({ block: "nearest" });
+	}, [focusedTaskId, focusedTaskLoaded]);
 
 	useEscapeKey(() => setDraft(null), Boolean(draft));
 
@@ -273,7 +280,11 @@ export function SchedulerPanel({ tasks, cwd, models }: SchedulerPanelProps) {
 			) : (
 				<ul className="scheduler-list">
 					{tasks.map((task) => (
-						<li key={task.id} className={`scheduler-item ${task.enabled ? "" : "off"}`}>
+						<li
+							key={task.id}
+							ref={task.id === focusedTaskId ? focusedRow : undefined}
+							className={`scheduler-item ${task.enabled ? "" : "off"}`}
+						>
 							<div className="scheduler-line1">
 								<span className="scheduler-name" title={task.description || task.name}>
 									{task.running ? `${t("schedulerRunning")} ` : ""}
@@ -321,7 +332,7 @@ export function SchedulerPanel({ tasks, cwd, models }: SchedulerPanelProps) {
 										t("schedulerNeverRun")
 									)}
 								</span>
-								{task.history.length > 1 && (
+								{task.history.length > 0 && (
 									<button type="button" className="scheduler-link" onClick={() => toggleHistory(task.id)}>
 										{t("schedulerHistory")} ({task.history.length})
 									</button>
@@ -338,6 +349,16 @@ export function SchedulerPanel({ tasks, cwd, models }: SchedulerPanelProps) {
 											{` · ${(h.durationMs / 1000).toFixed(0)}s`}
 											{h.manual ? ` · ${t("schedulerManualBadge")}` : ""}
 											{h.error ? ` · ${h.error}` : ""}
+											{h.sessionFile && onOpenTranscript && (
+												<button
+													type="button"
+													className="scheduler-link"
+													title={h.sessionFile}
+													onClick={() => onOpenTranscript(h.sessionFile!)}
+												>
+													{t("gsOpen")}
+												</button>
+											)}
 										</li>
 									))}
 								</ul>

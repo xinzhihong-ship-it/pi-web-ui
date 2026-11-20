@@ -54,6 +54,7 @@ export interface SchedulerTask {
 }
 
 export interface SchedulerRunRecord {
+	sessionFile?: string;
 	target?: "conversation" | "canvas";
 	graphId?: string;
 	runId?: string;
@@ -73,6 +74,7 @@ export interface SchedulerTaskView extends SchedulerTask {
 }
 
 export interface SchedulerExecutorResult {
+	sessionFile?: string;
 	target?: "conversation" | "canvas";
 	graphId?: string;
 	runId?: string;
@@ -302,6 +304,7 @@ function sanitizeHistory(v: unknown): SchedulerRunRecord[] {
 			...(typeof rec.graphId === "string" && rec.graphId ? { graphId: rec.graphId.slice(0, 64) } : {}),
 			...(typeof rec.runId === "string" && rec.runId ? { runId: rec.runId.slice(0, 128) } : {}),
 			...(typeof rec.error === "string" && rec.error ? { error: rec.error.slice(0, 500) } : {}),
+			...(typeof rec.sessionFile === "string" && rec.sessionFile ? { sessionFile: rec.sessionFile } : {}),
 			...(rec.manual === true ? { manual: true as const } : {}),
 		});
 	}
@@ -675,6 +678,12 @@ export class SchedulerStore {
 			result = { ok: false, error: String(err instanceof Error ? err.message : err) };
 		}
 		const durationMs = Date.now() - startedAt;
+		// 任务可在执行中被删除，并以同一 id 重建。旧一轮不能写进新任务的历史或改变它的下次触发时间。
+		if (this.tasks.get(id)?.createdAt !== task.createdAt) {
+			this.running.delete(id);
+			this.changed();
+			return result;
+		}
 		try {
 			this.recordRun(id, {
 				at: Date.now(),
@@ -684,10 +693,13 @@ export class SchedulerStore {
 				...(task.graphId ? { graphId: task.graphId } : {}),
 				...(result.runId ? { runId: result.runId } : {}),
 				...(result.conversationId ? { conversationId: result.conversationId } : {}),
+				...(result.sessionFile ? { sessionFile: result.sessionFile } : {}),
 				...(result.error ? { error: result.error.slice(0, 500) } : {}),
 				...(manual ? { manual } : {}),
 			});
-			if (task.oneShot) this.remove(id);
+			// 成功的绑定任务已把结果留在原对话；专用会话和失败原因仍需从任务历史打开。
+			if (task.oneShot && (task.target === "canvas" || (result.ok && (task.sessionFile || task.conversationId))))
+				this.remove(id);
 		} catch (err) {
 			result = {
 				ok: false,
@@ -732,7 +744,11 @@ export class SchedulerStore {
 	private recordRun(id: string, run: SchedulerRunRecord): void {
 		const t = this.tasks.get(id);
 		if (!t) return;
-		const next = { ...t, history: [run, ...sanitizeHistory(t.history)].slice(0, SCHEDULER_HISTORY_MAX) };
+		const next = {
+			...t,
+			...(t.oneShot && t.target !== "canvas" ? { enabled: false } : {}),
+			history: [run, ...sanitizeHistory(t.history)].slice(0, SCHEDULER_HISTORY_MAX),
+		};
 		this.save(new Map(this.tasks).set(id, next));
 	}
 }

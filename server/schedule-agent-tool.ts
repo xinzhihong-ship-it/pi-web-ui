@@ -276,25 +276,40 @@ export function makeScheduleTool(
 						L === "zh"
 							? `定时任务已创建：${task.id}（${task.name}）`
 							: `Scheduled task created: ${task.id} (${task.name})`;
+					const onceLabel = isCanvas
+						? pick(L, "（单次，触发后自动删除）", " (one-shot, removed after firing)", "sched.once.canvas")
+						: convId || bindSessionFile
+							? pick(
+									L,
+									"（单次，成功后自动删除，失败原因保留在历史中）",
+									" (one-shot, removed on success; failures retained in history)",
+									"sched.once.bound",
+								)
+							: pick(
+									L,
+									"（单次，执行后停用并保留记录）",
+									" (one-shot, disabled after the run with history retained)",
+									"sched.once.conversation",
+								);
 					const whenLine =
 						L === "zh"
-							? `触发：${parsed.kind === "cron" ? `cron ${parsed.spec}` : describeIntervalMs(Number(parsed.spec))}，下次 ${fmtTime(next, L)}${recurring ? "（周期）" : "（单次，触发后自动删除）"}`
-							: `Fires: ${parsed.kind === "cron" ? `cron ${parsed.spec}` : `every ${Math.round(Number(parsed.spec) / 1000)}s`}, next ${fmtTime(next, L)}${recurring ? " (recurring)" : " (one-shot, auto-deleted after firing)"}`;
+							? `触发：${parsed.kind === "cron" ? `cron ${parsed.spec}` : describeIntervalMs(Number(parsed.spec))}，下次 ${fmtTime(next, L)}${recurring ? "（周期）" : onceLabel}`
+							: `Fires: ${parsed.kind === "cron" ? `cron ${parsed.spec}` : `every ${Math.round(Number(parsed.spec) / 1000)}s`}, next ${fmtTime(next, L)}${recurring ? " (recurring)" : onceLabel}`;
 					const targetLine = isCanvas
 						? L === "zh"
 							? `目标：画布 ${graphId}；${prompt ? "使用提供的触发指令" : "使用图自带输入"}，模型由画布节点配置。`
 							: `Target: canvas ${graphId}; ${prompt ? "uses the supplied instruction" : "uses the graph's input"}, with models configured by canvas nodes.`
 						: convId
 							? L === "zh"
-								? `汇报：触发时自动唤醒本对话（${convId}）；压缩/重启后按会话文件自动重绑，原对话不在时先回落同项目活跃对话（明确提示），无存活对话才无头执行。`
-								: `Reports: wakes this conversation (${convId}) on fire; re-binds by session file after compaction/restart, falls back to the project's active conversation (with a visible note), headless only with no live conversation.`
+								? `汇报：触发时自动唤醒本对话（${convId}）；重启后按绑定的会话文件恢复。原文件不可用时，原因会记入定时任务历史。`
+								: `Reports: wakes this conversation (${convId}) on fire; reopens the bound transcript after a restart. If the file is unavailable, the reason is recorded in the scheduled task history.`
 							: L === "zh"
 								? "汇报：无头执行，报告进调度面板历史（创建时没拿到对话 id）。"
 								: "Reports: headless run, report in panel history (no conversation id captured at creation).";
 					const tail =
 						L === "zh"
-							? `取消：schedule(action="cancel", id="${task.id}")，或后台任务面板手动取消；查看：schedule(action="list")。`
-							: `Cancel: schedule(action="cancel", id="${task.id}"), or from the background-tasks panel; inspect: schedule(action="list").`;
+							? `取消：schedule(action="cancel", id="${task.id}")，或在设置的「定时任务」中取消；查看：schedule(action="list")。`
+							: `Cancel: schedule(action="cancel", id="${task.id}"), or from Scheduled tasks in Settings; inspect: schedule(action="list").`;
 					return text(`${head}\n${whenLine}\n${targetLine}\n${tail}`, { task });
 				}
 				case "list": {

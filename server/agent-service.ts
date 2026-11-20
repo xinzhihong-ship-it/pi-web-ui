@@ -400,7 +400,7 @@ import {
 	type CompactContextHost,
 	type PendingCompaction,
 } from "./compact-context-tool.js";
-import { disposeAllEvalKernels, disposeEvalSession, makeEvalTool } from "./eval-tool.js";
+import { disposeEvalSession, makeEvalTool } from "./eval-tool.js";
 import { normalizeToolInfo, type RawToolDefinition } from "./tool-info.js";
 import {
 	applyToolPromptOverrides,
@@ -445,7 +445,7 @@ import { agentBotToolAvailable, makeAgentBotTool } from "./device-center/bot-cre
 import { makeCanvasTool } from "./canvas/canvas-agent-tool.js";
 import { getWorktreeContext, removeWorktree, normalizeWirePath } from "./worktree-service.js";
 import type { WorktreeInfo } from "./protocol.js";
-import { sameSessionFile, type SchedulerStore } from "./scheduler-tasks.js";
+import type { SchedulerStore } from "./scheduler-tasks.js";
 import { buildAttachmentMessages, findTurnBaseEntryId, parseModelSpec } from "./attachments.js";
 import { scanAtMentions } from "./universal/universal-attachments.js";
 import {
@@ -825,6 +825,7 @@ import {
 import { conversationRowKind } from "./conversation-rows.js";
 
 export interface SessionOwnerInfo {
+	scheduler?: { taskId: string; state: "starting" | "running" | "finishing"; sessionFile: string };
 	clientId: string;
 	convId: string;
 	title: string;
@@ -4579,6 +4580,7 @@ export class ClientSession {
 		opts?: {
 			blank?: boolean;
 			blankTitle?: string;
+			schedulerSession?: { sessionFile: string; dedicated: boolean };
 			idleHeld?: boolean;
 			onNotificationEvent?: MobileNotificationCallback;
 		},
@@ -4602,20 +4604,30 @@ export class ClientSession {
 		const sessionBaseDir = resolveWorkspaceSessionDir(stateStore.dataDir, cwd);
 		const conversationId = cs.nextConversationId();
 		const terminals = cs.makeTerminalManager(conversationId, cwd);
+		const schedulerSession = opts?.schedulerSession;
 		const opened = await cs.openManagerAndRuntime(
-			() =>
-				botExecution
+			() => {
+				if (schedulerSession) {
+					const { sessionFile, dedicated } = schedulerSession;
+					if (!dedicated && !existsSync(sessionFile)) throw new Error(`找不到绑定的会话文件：${sessionFile}`);
+					return SessionManager.open(sessionFile, undefined, sessionBaseDir);
+				}
+				return botExecution
 					? SessionManager.create(sessionBaseDir, join(agentDir, "bot-sessions", clientId))
 					: opts?.blank
 						? SessionManager.create(sessionBaseDir)
-						: SessionManager.continueRecent(sessionBaseDir),
+						: SessionManager.continueRecent(sessionBaseDir);
+			},
 			(m) =>
 				createAgentSessionRuntime(cs.makeRuntimeFactory(terminals, undefined, conversationId), {
 					cwd: sessionBaseDir,
 					agentDir,
 					sessionManager: m,
 				}),
-			() => findMostRecentSessionFileFast(sessionBaseDir, cwd),
+			() =>
+				schedulerSession
+					? Promise.resolve(schedulerSession.sessionFile)
+					: findMostRecentSessionFileFast(sessionBaseDir, cwd),
 		);
 		const runtime = opened.runtime;
 		if (opened.repair) {
@@ -4677,7 +4689,10 @@ export class ClientSession {
 			conv.listed = true;
 		}
 
-		const pinnedPaths = botExecution ? [] : await pinnedPathsOwnedBy(cs.stateStore?.getPinnedSessions(cwd) ?? [], cwd);
+		const pinnedPaths =
+			botExecution || schedulerSession
+				? []
+				: await pinnedPathsOwnedBy(cs.stateStore?.getPinnedSessions(cwd) ?? [], cwd);
 		const maxOpenConversations = getMaxOpenConversations();
 		for (const p of pinnedPaths) {
 			if (cs.convs.size >= maxOpenConversations) break;
@@ -5471,7 +5486,9 @@ export class ClientSession {
 	}
 
 	private nextConversationId(): string {
-		return `c${++this.convSeq}`;
+		const id = `c${++this.convSeq}`;
+		// 任务运行结束会单独释放该 id 的工具内核和文件声明。
+		return this.clientId?.startsWith("scheduler:") ? `${this.clientId}:${id}` : id;
 	}
 
 	private conversationViewers = new Map<Conversation, Set<() => void>>();
@@ -6327,55 +6344,14 @@ export class ClientSession {
 		return key ? this.convs.get(key) : undefined;
 	}
 
-	resolveSchedulerTarget(opts: {
-		conversationId?: string;
-		sessionFile?: string;
-		cwd?: string;
-		excludeIds?: Set<string>;
-	}): Conversation | null {
-		const wantFile = String(opts.sessionFile ?? "").trim();
-		const wantId = String(opts.conversationId ?? "").trim();
-		const wantCwd = String(opts.cwd ?? "").trim();
-		const excluded = opts.excludeIds;
-		if (wantFile) {
-			let best: Conversation | null = null;
-			for (const c of this.convs.values()) {
-				if (!c?.session || (excluded && excluded.has(c.id))) continue;
-				let f = "";
-				try {
-					f = String(c.session.sessionFile ?? "");
-				} catch {
-					continue;
-				}
-				if (!sameSessionFile(f, wantFile)) continue;
-				if (!best || c.lastActiveAt > best.lastActiveAt) best = c;
-			}
-			if (best) return best;
+	/** 子代理结果可在主轮结束后触发父会话续写，等最后一个写入者和待投递的通知都结束。 */
+	async waitForSchedulerIdle(cancelled: () => boolean): Promise<void> {
+		while (
+			!cancelled() &&
+			[...this.convs.values()].some((conv) => !conv.session.isIdle || this.completionPending(conv))
+		) {
+			await sleep(100);
 		}
-		if (wantId) {
-			const c = this.convs.get(wantId);
-			if (!c?.session || (excluded && excluded.has(c.id))) return null;
-			if (wantCwd && !sameCwd(c.cwd, wantCwd)) return null;
-			return c;
-		}
-		return null;
-	}
-
-	findViewportInCwd(cwd: string, excludeIds?: Set<string>): Conversation | null {
-		const want = String(cwd ?? "").trim();
-		if (!want) return null;
-		let best: Conversation | null = null;
-		let bestSub: Conversation | null = null;
-		for (const c of this.convs.values()) {
-			if (!c?.session || (excludeIds && excludeIds.has(c.id))) continue;
-			if (!sameCwd(c.cwd, want)) continue;
-			if (c.isSubagent) {
-				if (!bestSub || c.lastActiveAt > bestSub.lastActiveAt) bestSub = c;
-			} else if (!best || c.lastActiveAt > best.lastActiveAt) {
-				best = c;
-			}
-		}
-		return best ?? bestSub;
 	}
 
 	async trySteerScheduler(
@@ -11134,11 +11110,17 @@ export class ClientSession {
 		return this.sinks.size;
 	}
 
+	isOpeningSessionFile(path: string): boolean {
+		const key = normalizePathKey(path);
+		return [...this.openingSessions.keys()].some((file) => normalizePathKey(file) === key);
+	}
+
 	findConversationBySessionFile(targetPath: string): Conversation | undefined {
+		const key = normalizePathKey(targetPath);
 		for (const conv of this.convs.values()) {
 			try {
 				const sessionFile = conv.session.sessionFile;
-				if (sessionFile && resolve(sessionFile) === targetPath) return conv;
+				if (sessionFile && normalizePathKey(sessionFile) === key) return conv;
 			} catch {}
 		}
 		return undefined;
@@ -11312,7 +11294,7 @@ export class ClientSession {
 		this.emitConversations();
 	}
 
-	sendNotice(msg: { type: "notice"; level: "info" | "warning" | "error"; text: string; textEn?: string }): void {
+	sendNotice(msg: Extract<ServerMessage, { type: "notice" }>): void {
 		this.emit(msg);
 	}
 
@@ -11590,13 +11572,14 @@ export class ClientSession {
 					}
 				} catch {}
 			}
-			const activeFile = this.activeSessionFileResolved();
+			const activeFile = conv.session.sessionFile ? resolve(conv.session.sessionFile) : undefined;
 			if (activeFile) {
 				const owner = this.findSessionOwner?.(activeFile);
-				if (owner && owner.isStreaming) {
+				if (owner && (owner.isStreaming || owner.scheduler)) {
 					this.emit({
 						type: "notice",
 						level: "warning",
+						...(owner.scheduler ? { schedulerTaskId: owner.scheduler.taskId } : {}),
 						text: `发送已拦截：该对话正在另一处运行中（「${owner.title}」）。请等它结束后再发，或回到原窗口继续 —— 否则两个 agent 会同时写同一份记录，其中一支事后不可见。`,
 						textEn: `Prompt blocked: this conversation is running in another window ("${owner.title}"). Wait for it to finish or continue there — two writers on one transcript would leave one run permanently invisible.`,
 					});
@@ -15508,6 +15491,24 @@ export class ClientSession {
 			}
 			const owner = this.findSessionOwner?.(targetPath);
 			if (owner && this.botExecution) throw new Error("Bot transcript still has an active owner");
+			if (owner?.scheduler) {
+				const { taskId, state, sessionFile } = owner.scheduler;
+				console.info("[scheduler] history open blocked", {
+					requestedSessionFile: targetPath,
+					ownerSessionFile: sessionFile,
+					taskId,
+					taskState: state,
+				});
+				this.emit({
+					type: "notice",
+					level: "warning",
+					schedulerTaskId: taskId,
+					text: `定时任务「${owner.title}」正在使用这份会话，运行结束后即可打开。`,
+					textEn: `Scheduled task "${owner.title}" is using this conversation. You can open it when the run finishes.`,
+				});
+				this.flushSnapshot();
+				return;
+			}
 			if (owner && owner.isStreaming) {
 				this.emit({
 					type: "notice",
@@ -15519,16 +15520,6 @@ export class ClientSession {
 				return;
 			}
 			if (owner) {
-				if (owner.clientId.startsWith("scheduler:")) {
-					this.emit({
-						type: "notice",
-						level: "warning",
-						text: `该对话正在由后台定时任务使用（「${owner.title}」），为避免并发写入，已停止打开。可在后台任务面板查看进度。`,
-						textEn: `This conversation is currently used by a background scheduled task ("${owner.title}"). Opening was blocked to prevent concurrent writes.`,
-					});
-					this.flushSnapshot();
-					return;
-				}
 				if (this.takeOverConversationElsewhere) {
 					await this.takeOverConversationElsewhere(owner.clientId, owner.convId);
 					outcome = "reused";
@@ -17310,7 +17301,6 @@ export class ClientSession {
 				await conv.runtime.dispose();
 			} catch {}
 		}
-		disposeAllEvalKernels();
 	}
 }
 

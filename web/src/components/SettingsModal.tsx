@@ -184,7 +184,8 @@ interface SettingsTerminalBridge {
 }
 
 interface SettingsModalProps {
-	initialSection?: "plugins";
+	initialSection?: "plugins" | "scheduler";
+	focusedTaskId?: string;
 	chat: {
 		settings: UiSettingsState | null;
 		plugins: UiPluginInfo[];
@@ -581,6 +582,7 @@ function LoadedSettingsModal({
 	serverSettings,
 	terminal,
 	initialSection,
+	focusedTaskId,
 	onSwitchToTerminal,
 	onClose,
 	onOpenIconEdit,
@@ -3271,6 +3273,11 @@ function LoadedSettingsModal({
 						{tab === "scheduler" && !isDsh && (
 							<SchedulerPanel
 								tasks={chat.schedulerTasks}
+								focusedTaskId={focusedTaskId}
+								onOpenTranscript={(path) => {
+									appSend({ type: "switch_session", path });
+									onClose();
+								}}
 								cwd={chat.state?.cwd ?? ""}
 								models={settings.subagentModels}
 							/>

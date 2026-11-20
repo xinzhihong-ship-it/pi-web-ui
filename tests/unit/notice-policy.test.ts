@@ -40,6 +40,12 @@ describe("notice-policy", () => {
 		expect(shouldSuppressNotice({ level: "error", text: "切换工作目录失败：路径不是目录" })).toBe(false);
 	});
 
+	it("keeps separate history links for scheduled tasks with the same name", () => {
+		const first: NoticeLike = { id: 1, level: "warning", text: "Daily is running", schedulerTaskId: "first" };
+		const second = { ...first, id: 2, schedulerTaskId: "second" };
+		expect(enqueueNotice([first], second)).toEqual([first, second]);
+	});
+
 	it("deduplicates identical notices and caps visible queue while protecting error notices", () => {
 		const initial: NoticeLike[] = [];
 		const afterSuppressed = enqueueNotice(initial, {

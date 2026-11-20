@@ -311,6 +311,23 @@ describe("SchedulerStore", () => {
 		expect(removed).toEqual(["once"]);
 	});
 
+	it.each([true, false])("单次对话停用并持久保留该轮记录（ok=%s）", async (ok) => {
+		const file = join(dir, "bound.jsonl");
+		const s = new SchedulerStore(dir, {
+			executor: async () => ({ ok, sessionFile: file, ...(ok ? {} : { error: "missing binding" }) }),
+		});
+		s.upsert({ ...BASE, id: "once", oneShot: true, sessionFile: ok ? "" : file });
+		await s.runNow("once");
+		const restored = new SchedulerStore(dir);
+		restored.load();
+		expect(restored.list()[0]).toMatchObject({
+			enabled: false,
+			running: false,
+			sessionFile: ok ? "" : file,
+			history: [{ ok, sessionFile: file, ...(ok ? {} : { error: "missing binding" }) }],
+		});
+	});
+
 	it("执行中 runNow 拒绝重入", async () => {
 		let release!: () => void;
 		const gate = new Promise<void>((r) => (release = r));

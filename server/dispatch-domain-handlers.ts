@@ -825,6 +825,7 @@ export function handleScheduleMessage(
 	msg: ClientMessage,
 	scheduler: SchedulerStore,
 	send: (msg: ServerMessage) => void,
+	source?: { getConversation(id: string): { cwd: string; session: { sessionFile?: string } } | undefined },
 ): boolean {
 	switch (msg.type) {
 		case "schedule_list":
@@ -841,7 +842,11 @@ export function handleScheduleMessage(
 			return true;
 		case "schedule_save":
 			try {
-				scheduler.upsert(msg.task);
+				const input = msg.task;
+				const bound =
+					input.conversationId && !input.sessionFile ? source?.getConversation(input.conversationId) : undefined;
+				const file = bound && bound.cwd === input.cwd ? bound.session.sessionFile : undefined;
+				scheduler.upsert(file ? { ...input, sessionFile: file } : input);
 			} catch (err) {
 				const isVal = err instanceof SchedulerValidationError;
 				send({

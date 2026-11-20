@@ -139,6 +139,7 @@ export interface UpdateAllItem {
 }
 
 export interface Notice {
+	schedulerTaskId?: string;
 	id: number;
 	level: "info" | "warning" | "error";
 	text: string;
@@ -2384,7 +2385,7 @@ export function useChat() {
 					}
 					dispatch({
 						type: "notice",
-						notice: { id, level: msg.level, text: msg.text, textEn: msg.textEn },
+						notice: { id, level: msg.level, text: msg.text, textEn: msg.textEn, schedulerTaskId: msg.schedulerTaskId },
 					});
 					break;
 				}

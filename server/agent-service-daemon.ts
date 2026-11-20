@@ -1,10 +1,12 @@
 import { join, resolve } from "node:path";
-import { sleep } from "./async-utils.js";
+import { realpath, stat } from "node:fs/promises";
+import { isInsideSessionsDir, readCwdFromSessionHeader } from "./session-search.js";
+import { disposeAllEvalKernels } from "./eval-tool.js";
 import { statSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { MobileNotificationCallback } from "./mobile-notification-events.js";
 import { VERSION, getAgentDir, ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
-import { ClientStateStore } from "./client-state.js";
+import { ClientStateStore, normalizePathKey } from "./client-state.js";
 import { ClaimStore } from "./claim-store.js";
 import { isBotExecutionRegistered } from "./device-center/bot-execution.js";
 import { toServiceInfo, launchOrigin } from "./launch-origin.js";
@@ -43,7 +45,7 @@ import type {
 	PluginChatRequest,
 	PluginChatResult,
 } from "./plugins.js";
-import type { SchedulerStore } from "./scheduler-tasks.js";
+import type { SchedulerStore, SchedulerTask, SchedulerExecutorResult } from "./scheduler-tasks.js";
 import {
 	ClientSession,
 	QuiesceRejectedError,
@@ -65,7 +67,21 @@ const PANEL_CONVERSATION_OPS = new Set<ClientMessage["type"]>([
 	"persist_conversation",
 ]);
 
+interface SchedulerRun {
+	taskId: string;
+	sessionFile: string;
+	cwd: string;
+	title: string;
+	state: "starting" | "running" | "finishing";
+	cancelled: boolean;
+	client?: ClientSession;
+	conversation?: Conversation;
+	aborting?: Promise<void>;
+	finished: Promise<void>;
+}
+
 export class AgentService {
+	private readonly schedulerRuns = new Map<string, SchedulerRun>();
 	static isPseudoClientId = isPseudoClientId;
 
 	private sharedViewers = new Map<
@@ -599,6 +615,12 @@ export class AgentService {
 				});
 				return false;
 			}
+			const scheduled = this.schedulerRuns.get(ownerId);
+			if (scheduled) {
+				this.releaseSchedulerClient(scheduled.taskId);
+				await scheduled.finished;
+				return true;
+			}
 			if (owner.conversationStreaming(conv)) {
 				await owner.abortConversation(conv);
 			}
@@ -743,10 +765,28 @@ export class AgentService {
 	}
 
 	findSessionOwner(targetPath: string, excludeClientId: string): SessionOwnerInfo | null {
+		const key = normalizePathKey(targetPath);
+		for (const [clientId, run] of this.schedulerRuns) {
+			if (clientId === excludeClientId || normalizePathKey(run.sessionFile) !== key) continue;
+			return {
+				clientId,
+				convId: run.conversation?.id ?? "",
+				title: run.title,
+				cwd: run.cwd,
+				isStreaming: run.state === "running",
+				connected: true,
+				scheduler: {
+					taskId: run.taskId,
+					state: run.state,
+					sessionFile: run.conversation?.session.sessionFile ?? run.sessionFile,
+				},
+			};
+		}
 		for (const [clientId, cs] of this.clients) {
 			if (clientId === excludeClientId) continue;
 			const conv = cs.findConversationBySessionFile(targetPath);
 			if (conv) {
+				const scheduled = this.schedulerRuns.get(clientId);
 				return {
 					clientId,
 					convId: conv.id,
@@ -754,6 +794,15 @@ export class AgentService {
 					cwd: conv.cwd,
 					isStreaming: cs.conversationStreaming(conv),
 					connected: cs.sinkCount() > 0,
+					...(scheduled
+						? {
+								scheduler: {
+									taskId: scheduled.taskId,
+									state: scheduled.state,
+									sessionFile: conv.session.sessionFile ?? targetPath,
+								},
+							}
+						: {}),
 				};
 			}
 		}
@@ -773,87 +822,6 @@ export class AgentService {
 			} catch {}
 		}
 		return undefined;
-	}
-
-	async wakeConversation(
-		id: string,
-		text: string,
-		opts?: { sessionFile?: string; cwd?: string },
-	): Promise<{
-		ok: boolean;
-		conversationId?: string;
-		sessionFile?: string;
-		clientId?: string;
-		busy?: boolean;
-		error?: string;
-	}> {
-		const wantFile = String(opts?.sessionFile ?? "").trim();
-		const wantCwd = String(opts?.cwd ?? "").trim();
-		if ((!id && !wantFile) || !text.trim()) return { ok: false, error: "唤醒目标或文本为空" };
-		if (this.quiesced) return { ok: false, error: "服务器正忙（quiesced），请稍后重试" };
-		const liveFile = (c: Conversation): string => {
-			try {
-				return String(c.session.sessionFile ?? "");
-			} catch {
-				return "";
-			}
-		};
-		const flush = (cs: ClientSession): void => {
-			try {
-				cs.flushSnapshot();
-			} catch {}
-		};
-		if (wantFile) {
-			const hits: { cs: ClientSession; clientId: string; conv: Conversation }[] = [];
-			for (const [clientId, cs] of this.clients) {
-				try {
-					const conv = cs.resolveSchedulerTarget({ sessionFile: wantFile });
-					if (conv) hits.push({ cs, clientId, conv });
-				} catch {}
-			}
-			hits.sort((a, b) => b.conv.lastActiveAt - a.conv.lastActiveAt);
-			let busyError: string | undefined;
-			for (const h of hits) {
-				try {
-					const r = await h.cs.trySteerScheduler(h.conv, text);
-					if (r.ok) {
-						flush(h.cs);
-						return { ok: true, conversationId: h.conv.id, sessionFile: liveFile(h.conv), clientId: h.clientId };
-					}
-					if (r.busy) busyError = r.error;
-				} catch {}
-			}
-			if (hits.length > 0) {
-				if (busyError) return { ok: false, busy: true, error: busyError };
-				return { ok: false, error: "目标对话投递失败（持有方异常）" };
-			}
-		}
-		if (id) {
-			const hits: { cs: ClientSession; clientId: string; conv: Conversation }[] = [];
-			for (const [clientId, cs] of this.clients) {
-				try {
-					const conv = cs.resolveSchedulerTarget({
-						conversationId: id,
-						...(wantCwd ? { cwd: wantCwd } : {}),
-					});
-					if (conv) hits.push({ cs, clientId, conv });
-				} catch {}
-			}
-			hits.sort((a, b) => b.conv.lastActiveAt - a.conv.lastActiveAt);
-			let busyError: string | undefined;
-			for (const h of hits) {
-				try {
-					const r = await h.cs.trySteerScheduler(h.conv, text);
-					if (r.ok) {
-						flush(h.cs);
-						return { ok: true, conversationId: h.conv.id, sessionFile: liveFile(h.conv), clientId: h.clientId };
-					}
-					if (r.busy) busyError = r.error;
-				} catch {}
-			}
-			if (busyError) return { ok: false, busy: true, error: busyError };
-		}
-		return { ok: false, error: "目标对话不在运行中（已关闭或服务重启过）" };
 	}
 
 	resolveSharedQuestion(
@@ -917,53 +885,6 @@ export class AgentService {
 			return true;
 		}
 		return false;
-	}
-
-	async wakeViewportInCwd(
-		cwd: string,
-		text: string,
-		excludeIds?: Set<string>,
-	): Promise<{
-		ok: boolean;
-		conversationId?: string;
-		sessionFile?: string;
-		clientId?: string;
-		busy?: boolean;
-		error?: string;
-	}> {
-		const want = String(cwd ?? "").trim();
-		if (!want || !text.trim()) return { ok: false, error: "回退目标或文本为空" };
-		if (this.quiesced) return { ok: false, error: "服务器正忙（quiesced），请稍后重试" };
-		const cands: { cs: ClientSession; clientId: string; conv: Conversation }[] = [];
-		for (const [clientId, cs] of this.clients) {
-			try {
-				const conv = cs.findViewportInCwd(want, excludeIds);
-				if (conv) cands.push({ cs, clientId, conv });
-			} catch {}
-		}
-		cands.sort((a, b) => b.conv.lastActiveAt - a.conv.lastActiveAt);
-		if (cands.length === 0) return { ok: false, error: "同项目无存活对话" };
-		let busyError: string | undefined;
-		for (const c of cands) {
-			try {
-				const r = await c.cs.trySteerScheduler(c.conv, text);
-				if (r.ok) {
-					try {
-						c.cs.flushSnapshot();
-					} catch {}
-					let f = "";
-					try {
-						f = String(c.conv.session.sessionFile ?? "");
-					} catch {
-						f = "";
-					}
-					return { ok: true, conversationId: c.conv.id, sessionFile: f, clientId: c.clientId };
-				}
-				if (r.busy) busyError = r.error;
-			} catch {}
-		}
-		if (busyError) return { ok: false, busy: true, error: busyError };
-		return { ok: false, error: "同项目对话投递失败" };
 	}
 
 	listProjectRunners(cwd: string, excludeClientId: string): ProjectRunnerInfo[] {
@@ -1095,13 +1016,11 @@ export class AgentService {
 	}
 
 	releaseSchedulerClient(taskId: string): void {
-		const safe = String(taskId ?? "").replace(/[^A-Za-z0-9_-]/g, "") || "task";
-		const clientId = `scheduler:${safe}`;
-		const cs = this.clients.get(clientId);
-		if (!cs) return;
-		this.clients.delete(clientId);
-		void cs.dispose().catch(() => {});
-		this.pokeExternalRunning(clientId);
+		const run = this.schedulerRuns.get(`scheduler:${taskId}`);
+		if (!run) return;
+		run.cancelled = true;
+		if (run.state === "running" && run.client && run.conversation)
+			run.aborting ??= run.client.abortConversation(run.conversation).catch(() => {});
 	}
 
 	pokeExternalRunning(excludeClientId: string): void {
@@ -1251,100 +1170,123 @@ export class AgentService {
 		return { ok: false, error: "Plugin run is no longer active" };
 	}
 
-	async chatFromScheduler(task: {
-		id: string;
-		name?: string;
-		cwd: string;
-		prompt: string;
-		model?: string;
-		thinkingLevel?: string;
-	}): Promise<{ ok: boolean; conversationId?: string; error?: string }> {
-		const safe = String(task.id ?? "task").replace(/[^A-Za-z0-9_-]/g, "") || "task";
-		const clientId = `scheduler:${safe}`;
-		const text = String(task.prompt ?? "");
-		if (!text.trim()) return { ok: false, error: "触发指令为空" };
+	async chatFromScheduler(task: SchedulerTask): Promise<SchedulerExecutorResult> {
+		const { cwd, prompt, id } = task;
 		if (this.quiesced) return { ok: false, error: "服务器正忙（quiesced），请稍后重试" };
-		const cwd = String(task.cwd ?? "").trim();
+		if (!prompt.trim()) return { ok: false, error: "触发指令为空" };
+		if (!task.sessionFile && task.conversationId)
+			return { ok: false, error: `原绑定 ${task.conversationId} 缺少会话文件，无法确认身份。请重新绑定原对话。` };
+		const clientId = `scheduler:${id}`;
+		const agentDir = process.env.PI_CODING_AGENT_DIR ?? getAgentDir();
+		// 单独的目录避免普通浏览器的 continueRecent 选中任务文件。重建同名任务也有独立身份。
+		const key = createHash("sha256")
+			.update(JSON.stringify([id, task.createdAt, normalizePathKey(cwd)]))
+			.digest("hex");
+		const dedicated = !task.sessionFile;
+		const sessionFile = dedicated
+			? join(agentDir, "sessions", ".scheduler", key, "task.jsonl")
+			: resolve(task.sessionFile);
+		let run: SchedulerRun | undefined;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let settleRun: (() => void) | undefined;
 		try {
-			if (!cwd || !statSync(cwd).isDirectory()) throw new Error("not-a-dir");
-		} catch {
-			return { ok: false, error: `目标项目不存在或不是目录：${cwd || "（空）"}` };
-		}
-		try {
-			const cs = await this.attach(clientId, () => {});
-			if (cs.cwd !== cwd) await cs.setCwd(cwd);
-			const model = String(task.model ?? "").trim();
-			if (model) {
-				try {
-					await cs.switchModelOrThrow(model);
-				} catch (err) {
-					return { ok: false, error: `切换模型失败（${model}）：${(err as Error).message}` };
-				}
-			}
-			const thinking = String(task.thinkingLevel ?? "").trim();
-			if (thinking) {
-				try {
-					cs.setThinking(thinking);
-				} catch (err) {
-					return { ok: false, error: `切换思考强度失败（${thinking}）：${(err as Error).message}` };
-				}
-			}
-			const conversationId = cs.readConversationForPlugins()?.conversationId ?? "";
-			const taskTitle = (task.name || "").trim() || (text.length > 30 ? text.slice(0, 30) : text);
-			if (conversationId && taskTitle) {
-				void cs.renameConversation(conversationId, taskTitle);
-			}
-			if (cs.readConversationForPlugins()?.isStreaming === true) {
-				return {
-					ok: false,
-					conversationId: conversationId || undefined,
-					error: "上一轮后台任务仍在执行中，跳过本次触发",
-				};
-			}
-			let promptError: string | undefined;
-			void cs.prompt(`[定时任务] ${text}`).catch((err) => {
-				promptError = String((err as Error)?.message ?? err);
+			const project = await stat(cwd).catch((err: NodeJS.ErrnoException) => {
+				if (err.code === "ENOENT") throw new Error(`目标项目不存在：${cwd}`);
+				throw err;
 			});
-			const deadline = Date.now() + 10 * 60 * 1000;
-			for (;;) {
-				await sleep(2000);
-				if (promptError) {
-					return { ok: false, conversationId: conversationId || undefined, error: promptError };
-				}
-				let streaming = false;
-				let lastError: string | undefined;
-				try {
-					const snap = cs.readConversationForPlugins();
-					streaming = snap?.isStreaming === true;
-					const msgs = snap?.messages ?? [];
-					for (let i = msgs.length - 1; i >= 0; i--) {
-						const m = msgs[i];
-						if (m.role === "assistant" && m.errorMessage) {
-							lastError = m.errorMessage;
-							break;
-						}
-						if (m.role === "assistant") break;
-					}
-				} catch {
-					streaming = false;
-				}
-				if (!streaming) {
-					if (lastError) return { ok: false, conversationId: conversationId || undefined, error: lastError };
-					return { ok: true, conversationId: conversationId || undefined };
-				}
-				if (Date.now() >= deadline) {
-					try {
-						await cs.abort();
-					} catch {}
-					return {
-						ok: false,
-						conversationId: conversationId || undefined,
-						error: "运行超时（10 分钟），已中止后台会话",
-					};
-				}
+			if (!project.isDirectory()) throw new Error(`目标项目不是目录：${cwd}`);
+			if (!dedicated) {
+				const actual = await realpath(sessionFile).catch((err: NodeJS.ErrnoException) => {
+					if (err.code === "ENOENT") throw new Error(`找不到绑定的会话文件：${sessionFile}`);
+					throw err;
+				});
+				if (!isInsideSessionsDir(agentDir, actual) || !actual.endsWith(".jsonl"))
+					throw new Error(`绑定的文件不在会话目录内：${sessionFile}`);
+				const headerCwd = await readCwdFromSessionHeader(actual);
+				if (!headerCwd || normalizePathKey(headerCwd) !== normalizePathKey(cwd))
+					throw new Error(`绑定文件的项目与任务不符，或文件头无效：${sessionFile}`);
 			}
+			if (this.schedulerRuns.has(clientId) || this.clients.has(clientId) || this.pending.has(clientId))
+				return { ok: false, error: "已有客户端正在使用该任务身份" };
+			const owner = this.findSessionOwner(sessionFile, "");
+			if (owner) {
+				if (owner.clientId.startsWith("scheduler:"))
+					return { ok: false, error: `会话正由其他定时任务使用：${sessionFile}` };
+				const cs = this.clients.get(owner.clientId);
+				const conv = cs?.getConversation(owner.convId);
+				if (!cs || !conv || normalizePathKey(conv.cwd) !== normalizePathKey(cwd))
+					return { ok: false, error: `无法确认绑定会话的持有方：${sessionFile}` };
+				const delivered = await cs.trySteerScheduler(conv, `[定时任务 ${task.name}] ${prompt}`);
+				return { ...delivered, conversationId: conv.id, sessionFile };
+			}
+			if ([...this.clients.values()].some((cs) => cs.isOpeningSessionFile(sessionFile)))
+				return { ok: false, error: `会话正在打开，请稍后重试：${sessionFile}` };
+			run = {
+				taskId: id,
+				sessionFile,
+				cwd,
+				title: task.name,
+				state: "starting",
+				cancelled: false,
+				finished: new Promise<void>((resolveRun) => {
+					settleRun = resolveRun;
+				}),
+			};
+			this.schedulerRuns.set(clientId, run);
+			const cs = await ClientSession.create(clientId, cwd, this.stateStore, {
+				schedulerSession: { sessionFile, dedicated },
+				onNotificationEvent: (event) => this.onNotificationEvent?.(event),
+			});
+			run.client = cs;
+			if (run.cancelled) return { ok: false, error: "定时任务已取消" };
+			const concurrentOwner = this.findSessionOwner(sessionFile, clientId);
+			if (concurrentOwner) return { ok: false, error: `会话已在另一处打开，请重试：${sessionFile}` };
+			this.clients.set(clientId, cs);
+			this.configureClient(cs, clientId);
+			const conversationId = cs.activeConversationId();
+			const conv = cs.getConversation(conversationId);
+			if (!conv?.session.sessionFile || normalizePathKey(conv.session.sessionFile) !== normalizePathKey(sessionFile))
+				throw new Error(`定时任务未打开预期的会话文件：${sessionFile}`);
+			run.conversation = conv;
+			let promptError: string | undefined;
+			cs.attachSink((msg) => {
+				if (msg.type === "notice" && msg.level === "error") promptError = msg.text;
+			});
+			if (task.model) await cs.switchModelOrThrow(task.model);
+			if (task.thinkingLevel) cs.setThinking(task.thinkingLevel);
+			if (dedicated && conv.title !== task.name) await cs.renameConversation(conversationId, task.name);
+			if (run.cancelled) return { ok: false, error: "定时任务已取消" };
+			run.state = "running";
+			let timedOut = false;
+			timer = setTimeout(() => {
+				timedOut = true;
+				this.releaseSchedulerClient(id);
+			}, 10 * 60_000);
+			await cs.prompt(`[定时任务 ${task.name}] ${prompt}`, undefined, false, conv);
+			await cs.waitForSchedulerIdle(() => timedOut || run!.cancelled);
+			const last = cs.getMessagesOfConversation(conversationId)?.findLast((m) => m.role === "assistant");
+			const error = timedOut
+				? "运行超时（10 分钟）"
+				: run.cancelled
+					? "定时任务已取消"
+					: promptError || last?.errorMessage;
+			return { ok: !error, conversationId, sessionFile, ...(error ? { error } : {}) };
 		} catch (err) {
 			return { ok: false, error: (err as Error).message };
+		} finally {
+			if (timer) clearTimeout(timer);
+			if (run) {
+				run.state = "finishing";
+				try {
+					await run.aborting;
+					await run.client?.dispose();
+				} finally {
+					if (this.clients.get(clientId) === run.client) this.clients.delete(clientId);
+					this.schedulerRuns.delete(clientId);
+					settleRun?.();
+					this.pokeExternalRunning(clientId);
+				}
+			}
 		}
 	}
 
@@ -1502,10 +1444,13 @@ export class AgentService {
 			return;
 		}
 		if (ownerId.startsWith("scheduler:")) {
-			fail(
-				"定时任务会话不支持过户 —— 报告会自动落回绑定的对话，可在后台任务面板查看进度",
-				"Scheduler sessions cannot be taken over — reports are saved to the bound conversation automatically; check progress in the Background Tasks panel.",
-			);
+			target.sendNotice({
+				type: "notice",
+				level: "warning",
+				schedulerTaskId: ownerId.slice("scheduler:".length),
+				text: "定时任务正在使用这份会话，运行结束后即可打开。",
+				textEn: "A scheduled task is using this conversation. You can open it when the run finishes.",
+			});
 			return;
 		}
 		const source = this.clients.get(ownerId);
@@ -1644,10 +1589,13 @@ export class AgentService {
 		}
 		if (ownerId === targetId) return;
 		if (AgentService.isPseudoClientId(ownerId)) {
-			fail(
-				"定时任务/插件会话的问卷不支持跨页作答 —— 报告会自动落回绑定的对话，可在后台任务面板查看进度",
-				"Scheduler/plugin session questions cannot be answered cross-page — reports are saved to the bound conversation automatically; check progress in the Background Tasks panel.",
-			);
+			target.sendNotice({
+				type: "notice",
+				level: "warning",
+				...(ownerId.startsWith("scheduler:") ? { schedulerTaskId: ownerId.slice("scheduler:".length) } : {}),
+				text: "请打开这份会话查看问卷。",
+				textEn: "Open the source conversation to view its question.",
+			});
 			return;
 		}
 		const source = this.clients.get(ownerId);
@@ -1727,6 +1675,7 @@ export class AgentService {
 		send: (msg: ServerMessage) => void,
 		sendShared: (msg: ServerMessage) => void = send,
 	): Promise<ClientSession> {
+		if (this.schedulerRuns.has(clientId)) throw new Error("定时任务持有此客户端身份");
 		let cs = this.clients.get(clientId);
 		if (!cs) {
 			const inflight = this.pending.get(clientId);
@@ -1764,7 +1713,7 @@ export class AgentService {
 					const requiresBlankSession = isOrphanAdoptionExcludedClientId(clientId);
 					if (requiresBlankSession) {
 						createOpts = { blank: true };
-					} else if (this.clients.size > 0) {
+					} else if (this.clients.size > 0 || this.schedulerRuns.size > 0) {
 						try {
 							const sessionBaseDir = resolveWorkspaceSessionDir(this.stateStore.dataDir, cwd);
 							const recentPath = await findMostRecentSessionFileFast(sessionBaseDir, cwd);
@@ -1813,6 +1762,13 @@ export class AgentService {
 			if (!isSharedExecutionClientId(clientId)) send(this.globalInteractions());
 			this.clearOfflineRows(clientId);
 		}
+		this.configureClient(cs, clientId);
+		this.onClientCwdChanged?.(cs.cwd, cs.workspaceRoots);
+		void cs.resumeInterrupted(this.stateStore.takeInterrupted(clientId));
+		return cs;
+	}
+
+	private configureClient(cs: ClientSession, clientId: string): void {
 		cs.onDisposed = () => this.releaseSharedClient(cs);
 		cs.onQuit = this.onQuit;
 		cs.onToolEvent = this.onToolEvent;
@@ -1827,9 +1783,6 @@ export class AgentService {
 		cs.isQuiesced = () => this.quiesced;
 		this.wireClient(cs, clientId);
 		cs.onCwdChanged = (abs, roots) => this.onClientCwdChanged?.(abs, roots);
-		this.onClientCwdChanged?.(cs.cwd, cs.workspaceRoots);
-		void cs.resumeInterrupted(this.stateStore.takeInterrupted(clientId));
-		return cs;
 	}
 
 	applyPluginAgentTools(): void {
@@ -1946,8 +1899,12 @@ export class AgentService {
 
 	async disposeAll(): Promise<void> {
 		this.recordInterruptedRuns();
+		const scheduled = [...this.schedulerRuns.values()];
+		for (const run of scheduled) this.releaseSchedulerClient(run.taskId);
+		await Promise.all(scheduled.map((run) => run.finished));
 		const all = [...this.clients.values()];
 		this.clients.clear();
 		await Promise.all(all.map((cs) => cs.dispose()));
+		disposeAllEvalKernels();
 	}
 }

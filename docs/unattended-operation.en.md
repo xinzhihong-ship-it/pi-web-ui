@@ -89,6 +89,10 @@ Startup happens in the `httpServer.listen()` callback (`server/index.ts`): `star
 Built-in scheduled tasks also changed from "call `scheduler.start()` directly at module top level" to registering
 as a `kind: "boot"` executor, so their activation timing, failures and health snapshot match the plugins.
 
+A conversation task with both binding fields empty uses a private transcript under `.scheduler/` in the SDK sessions directory. The task ID, creation time and project directory determine its file across restarts. A bound task delivers to the owner of the exact file or opens that file on disk. A missing file, mismatched project or legacy binding with only a window-local conversation ID produces a failed run with the reason. A one-shot task with a private transcript, or a failed one-shot conversation task, retains its history and is disabled. Successful bound one-shot tasks are removed after delivering the result to the original conversation.
+
+While the scheduler holds the file, the history notice opens the matching task record. The transcript becomes available when the runtime finishes and releases the file. Settings → Scheduled tasks → History also opens the transcript for a recorded run.
+
 ## 3. Observability: `/api/health`
 
 ```jsonc
