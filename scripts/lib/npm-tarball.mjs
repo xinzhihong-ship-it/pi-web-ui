@@ -106,6 +106,7 @@ const MACH_O = [
 	[0xca, 0xfe, 0xba, 0xbe], // 通用二进制
 ];
 const SHEBANG = [0x23, 0x21];
+const PNG_SIGNATURE = Buffer.from("89504e470d0a1a0a", "hex");
 
 const startsWith = (magic, bytes) => bytes.every((byte, index) => magic[index] === byte);
 
@@ -198,6 +199,19 @@ export function inspectNpmTarball(tarball) {
 				problems.add(`bin "${command}" 指向的 ${path} 权限是 ${formatMode(entry.mode)}，缺可执行位`);
 		}
 	}
+
+	const webRoot = "package/web/dist";
+	const webManifest = byName.get(`${webRoot}/manifest.webmanifest`);
+	if (webManifest) {
+		const { icons = [] } = JSON.parse(buffer.subarray(webManifest.dataStart, webManifest.dataEnd).toString("utf8"));
+		for (const { src, type } of icons) {
+			if (type !== "image/png") continue;
+			const url = new URL(src, "https://app.invalid/");
+			if (url.origin !== "https://app.invalid") continue;
+			const icon = byName.get(webRoot + url.pathname);
+			if (icon?.type !== FILE_TYPE || !icon.magic.equals(PNG_SIGNATURE)) problems.add(`包中缺少有效的 PNG 图标 ${src}`);
+		}
+	} else if (byName.has(`${webRoot}/index.html`)) problems.add("包里没有 web/dist/manifest.webmanifest");
 
 	for (const entry of entries) {
 		if (entry.type !== FILE_TYPE || entry.mode === EXECUTABLE_MODE) continue;

@@ -98,6 +98,22 @@ describe("npm tarball 的 bin 可执行位", () => {
 });
 
 describe("npm tarball 发布前复查", () => {
+	it("校验 Web 清单引用的 PNG，能发现漏打的图标和误回退的 HTML", async () => {
+		const src = "./icons/icon-192.png";
+		const files = {
+			"package.json": manifest({}),
+			"web/dist/index.html": "<!doctype html>",
+			"web/dist/manifest.webmanifest": JSON.stringify({ icons: [{ src, type: "image/png" }] }),
+		};
+		const iconPath = "web/dist/icons/icon-192.png";
+		expect(inspectNpmTarball(await pack(files)).problems.join("\n")).toContain(src);
+		expect(
+			inspectNpmTarball(await pack({ ...files, [iconPath]: files["web/dist/index.html"] })).problems.join("\n"),
+		).toContain(src);
+		const png = readFileSync(join(ROOT, "web/public", src));
+		expect(inspectNpmTarball(await pack({ ...files, [iconPath]: png })).problems).toEqual([]);
+	});
+
 	it("0644 的 bin 会被指出来（就是线上 0.120.0 的形态），归一化后干净", async () => {
 		const archive = await pack({ "package.json": manifest({ demo: "bin/demo.mjs" }), "bin/demo.mjs": SHEBANG });
 

@@ -60,6 +60,7 @@ plugin-registry/
 
 dev/wechat-shot*.png
 *.png
+!web/public/icons/*.png
 *.jpg
 *.jpeg
 !assets/**
